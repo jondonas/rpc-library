@@ -5,6 +5,12 @@ librpc.a: librpc.o
 librpc.o: librpc.cpp rpc.h
 	g++ -c librpc.cpp
 
+binder: binder.o
+	g++ -o binder binder.o
+
+binder.o: binder.cpp
+	g++ -c binder.cpp
+
 clean:
 	rm -f *.o
 
