@@ -11,6 +11,7 @@ struct Server
 {
   std::string ip;
   std::string port;
+  Server(std::string ip, std::string port);
 };
 
 class Proc
@@ -21,12 +22,29 @@ class Proc
     Server *get_next_available_server();
 };
 
+
+/***
+ * CONSTANTS
+ ***/
+
+std::map<std::string, Proc> PROCS;
+Server *last_used_server = NULL;
+
+/***
+ * METHODS
+ ***/
+
+Server::Server(std::string ip, std::string port) : ip(ip), port(port)
+{
+}
+
 Server *Proc::get_next_available_server()
 {
   if (servers.size() == 0) return NULL;
   if (current_server >= servers.size()) current_server = 0;
   Server *server = &(servers[current_server]);
-  if (last_used_server != NULL && server->ip == last_used_server->ip) {
+  if (last_used_server != NULL && server->ip == last_used_server->ip)
+  {
     current_server = (current_server + 1) % servers.size();
     server = &(servers[current_server]);
   }
@@ -36,28 +54,21 @@ Server *Proc::get_next_available_server()
 }
 
 /***
- * CONSTANTS
- ***/
-
-std::map<string, std::vector<Proc>> PROCS;
-Server *last_used_server = NULL;
-
-/***
  * BINDER
  ***/
   
 // Maps a procedure name with a server
-void register_proc_server(string proc_name, string server_ip, string server_port)
+void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
-  Server server = Server(server_ip, server_port);
+  Server server(server_ip, server_port);
   Proc proc = PROCS[proc_name];
   proc.servers.push_back(server);
 }
 
 // Removes a mapping between a procedure name and a server
-void remove_proc_server(string server_ip)
+void remove_proc_server(std::string server_ip)
 {
-  for (std::map<string, Proc>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
+  for (std::map<std::string, Proc>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
   {
     std::vector<Server> proc_servers = it->second.servers;
     for (int i = 0; i < proc_servers.size(); ++i)
@@ -71,7 +82,7 @@ void remove_proc_server(string server_ip)
 }
 
 // Returns the next available server for a given procedure name, otherwise returns NULL.
-Server *get_proc_server(string proc_name)
+Server *get_proc_server(std::string proc_name)
 {
   return PROCS[proc_name].get_next_available_server();
 }
