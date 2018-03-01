@@ -26,7 +26,12 @@ Server *Proc::get_next_available_server()
   if (servers.size() == 0) return NULL;
   if (current_server >= servers.size()) current_server = 0;
   Server *server = &(servers[current_server]);
+  if (last_used_server != NULL && server->ip == last_used_server->ip) {
+    current_server = (current_server + 1) % servers.size();
+    server = &(servers[current_server]);
+  }
   current_server = (current_server + 1) % servers.size();
+  last_used_server = server;
   return server;
 }
 
@@ -35,6 +40,7 @@ Server *Proc::get_next_available_server()
  ***/
 
 std::map<string, std::vector<Proc>> PROCS;
+Server *last_used_server = NULL;
 
 /***
  * BINDER
