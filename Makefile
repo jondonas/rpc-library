@@ -1,3 +1,5 @@
+all: binder librpc.a
+
 librpc.a: librpc.o
 	ar -rcs librpc.a librpc.o
 	make clean
