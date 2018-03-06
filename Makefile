@@ -4,7 +4,7 @@ librpc.a: librpc.o
 	ar -rcs librpc.a librpc.o
 	make clean
 
-librpc.o: librpc.cpp rpc.h
+librpc.o: librpc.cpp rpc.h rpc_extra.h
 	g++ -c librpc.cpp
 
 binder: binder.o

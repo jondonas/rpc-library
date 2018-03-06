@@ -1,21 +1,11 @@
 #include "rpc.h"
+#include "rpc_extra.h"
 #include <arpa/inet.h>
 #include <cstdlib>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <cstring>
 #include <iostream>
-
-// Type values for messages
-// This should be moved to a header file or something later
-#define REGISTER            1
-#define LOC_REQUEST         2
-#define LOC_SUCCESS         3
-#define LOC_FAILURE         4
-#define EXECUTE             5
-#define EXECUTE_SUCCESS	    6
-#define	EXECUTE_FAILURE     7
-#define TERMINATE           8
 
 int rpcCall(char* name, int* argTypes, void** args) {
     // Get binder address from env variables
@@ -98,15 +88,15 @@ int rpcCall(char* name, int* argTypes, void** args) {
     send(sock, (char*)&msg, 4, 0);
 
     // Send args
-    int output_type;
-    int output_array
+    int output_len;
+    int output_array_len;
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         bool input = argTypes[arg_count] & 0x80000000;
         bool output = argTypes[arg_count] & 0x40000000;
 
         type = argTypes[arg_count] & 0xFF0000;
-        int array = argTypes[arg_count] & 0xFFFF;
+        int array_len = argTypes[arg_count] & 0xFFFF;
         int len;
         // Get size of argument
         if (type == ARG_CHAR) len = sizeof(char);
@@ -118,8 +108,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
 
         // Determine output type to save code duplication later
         if (output) {
-            output_type = type;
-            output_array = array;
+            output_len = len;
+            output_array_len = array_len;
         }
 
         // Only send args that are input to the server
@@ -129,9 +119,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
         }
 
         // Send elements of array
-        if (array > 0) {
-            for (int i = 0; i < array; ++i)
-                send(sock, &(args[arg_count][i]), len, 0);
+        if (array_len > 0) {
+            send(sock, args[arg_count], array_len*len, 0);
         }
         // Send scalar
         else
@@ -163,13 +152,19 @@ int rpcCall(char* name, int* argTypes, void** args) {
             continue;
         }
 
-        if (output_array > 0) {
-            for (int i = 0; i < output_array; ++i)
-                recv(sock, &(args[arg_count][i]), output_len, 0);
+        if (output_array_len > 0) {
+            for (int i = 0; i < output_array_len; ++i)
+                recv(sock, args[arg_count], output_len*output_array_len, 0);
         }
         else
             recv(sock, args[arg_count], output_len, 0);
+
+        break;
     }
 
+    return 0;
+}
+
+int rpcInit(void) {
     return 0;
 }
