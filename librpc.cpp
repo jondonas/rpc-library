@@ -8,6 +8,8 @@
 #include <iostream>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <limits.h>
+#include <netdb.h>
 
 int binderConnect(int *sock) {
     // Get binder address from env variables
@@ -75,8 +77,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
     }
     // Else we have success
     // This assumes port is an integer at the end of the message and address is null terminated
-    char server_addr[64];
-    recv(sock, server_addr, 64, 0);
+    char server_addr[65];
+    recv(sock, server_addr, 65, 0);
     int server_port;
     recv(sock, &server_port, 4, 0);
     server_port = ntohl(server_port);
@@ -93,7 +95,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
         return -3;
     }
 
-    // Send execute request
+    // Send EXECUTE request
     // This iterates through argTypes and sends the actual values found
     // at the arg
     msg = htonl(EXECUTE);
@@ -209,12 +211,74 @@ int rpcInit(void) {
     bind(sock_client, (struct sockaddr *)&address, sizeof(address));
     
     // Get client port
-    int client_port;
     struct sockaddr_in sin;
     socklen_t addrlen = sizeof(sin);
     getsockname(sock_client, (struct sockaddr *)&sin, &addrlen);
     client_port = ntohs(sin.sin_port);
 
+    // Get ip of server
+    char hostname[HOST_NAME_MAX];
+    gethostname(hostname, HOST_NAME_MAX);
+    struct hostent *host;
+    struct in_addr **addresses;
+    host = gethostbyname(hostname);
+    addresses = (struct in_addr **) host->h_addr_list;
+    strncpy(server_ip, inet_ntoa(*addresses[0]), 64);
 
     return 0;
+}
+
+int rpcRegister(char *name, int *argTypes, skeleton f) {
+    // Alloc memory for saving in database later
+    char *name_save = new char[65];
+
+    // Send REGISTER message
+    int msg = htonl(REGISTER);
+    send(sock_binder, (char*)&msg, 4, 0);
+    // Send server ip
+    send(sock_binder, server_ip, 65, 0);
+    // Send server port
+    msg = htonl(client_port);
+    send(sock_binder, (char*)&msg, 4, 0);
+    // Send function name
+    strncpy(name_save, name, 64);
+    send(sock_binder, name_save, 65, 0);
+    // Send argTypes
+    int arg_count = 0;
+    while (argTypes[arg_count] != 0) {
+        msg = htonl(argTypes[arg_count]);
+        send(sock_binder, (char*)&msg, 4, 0);
+        ++arg_count;
+    }
+    // Terminator
+    msg = 0;
+    send(sock_binder, (char*)&msg, 4, 0);
+
+    // Receive response
+    int type;
+    recv(sock_binder, &type, 4, 0);
+    type = ntohl(type);
+    // Get return code
+    int status;
+    recv(sock_binder, &status, 4, 0);
+    status = ntohl(status);
+    if (type == LOC_FAILURE) {
+        // Return error code 
+        delete[] name_save;
+        return status;
+    }
+    // Else we have success. Register function in local database
+    // Alloc space to copy over deets
+    int *argTypes_save = new int[arg_count];
+    arg_count = 0;
+    while (argTypes[arg_count] != 0) {
+        argTypes_save[arg_count] = argTypes[arg_count];
+        ++arg_count;
+    }
+    argTypes_save[arg_count] = 0;
+
+    database.push_back(std::make_tuple(name_save, argTypes_save, f));
+
+    // status will be >= 0, so return it to include warnings
+    return status;
 }
