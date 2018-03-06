@@ -6,8 +6,10 @@
 #include <sys/socket.h>
 #include <cstring>
 #include <iostream>
+#include <unistd.h>
+#include <sys/ioctl.h>
 
-int rpcCall(char* name, int* argTypes, void** args) {
+int binderConnect(int *sock) {
     // Get binder address from env variables
     int binder_port;
     char *binder_addr = getenv("BINDER_ADDRESS");
@@ -18,17 +20,26 @@ int rpcCall(char* name, int* argTypes, void** args) {
     }
     binder_port = atoi(binder_port_c);
 
-    // Setup socket and connect to server
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    // Setup socket and connect to binder
+    *sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in server;
     server.sin_family = AF_INET;
     server.sin_port = htons(binder_port);
     inet_pton(AF_INET, binder_addr, &server.sin_addr);
   
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        // Couldn't connect to server
+    if (connect(*sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        // Couldn't connect to binder
         return -2;
     }
+
+    return 0;
+}
+
+int rpcCall(char* name, int* argTypes, void** args) {
+    int sock;
+    int ret = binderConnect(&sock);
+    if (ret < 0)
+        return ret;
 
     // Send LOC_REQUEST message
     int msg = htonl(LOC_REQUEST);
@@ -69,6 +80,18 @@ int rpcCall(char* name, int* argTypes, void** args) {
     int server_port;
     recv(sock, &server_port, 4, 0);
     server_port = ntohl(server_port);
+    close(sock);
+
+    // Connect to server
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(server_port);
+    inet_pton(AF_INET, server_addr, &server.sin_addr);
+  
+    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        // Couldn't connect to server
+        return -3;
+    }
 
     // Send execute request
     // This iterates through argTypes and sends the actual values found
@@ -162,9 +185,36 @@ int rpcCall(char* name, int* argTypes, void** args) {
         break;
     }
 
+    close(sock);
+
     return 0;
 }
 
 int rpcInit(void) {
+    int ret = binderConnect(&sock_binder);
+    if (ret < 0)
+        return ret;
+
+    // Create socket to listen for clients
+    int on = 1;
+    struct sockaddr_in address;
+    sock_client = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(sock_client, SOL_SOCKET,  SO_REUSEADDR, (char *)&on, sizeof(on));
+    ioctl(sock_client, FIONBIO, (char *)&on);
+
+    // Bind socket
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(0);
+    bind(sock_client, (struct sockaddr *)&address, sizeof(address));
+    
+    // Get client port
+    int client_port;
+    struct sockaddr_in sin;
+    socklen_t addrlen = sizeof(sin);
+    getsockname(sock_client, (struct sockaddr *)&sin, &addrlen);
+    client_port = ntohs(sin.sin_port);
+
+
     return 0;
 }

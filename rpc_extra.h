@@ -8,3 +8,4 @@
 #define EXECUTE_FAILURE     7
 #define TERMINATE           8
 
+int sock_client, sock_binder;
