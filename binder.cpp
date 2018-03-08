@@ -6,6 +6,9 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <limits.h>
+#include <iostream>
 #include <string>
 #include <map>
 #include <vector>
@@ -110,6 +113,8 @@ int main()
   struct sockaddr_in   addr;
   struct timeval       timeout;
   struct fd_set        master_set, working_set;
+  char   ip[INET_ADDRSTRLEN];
+  uint16_t port;
 
   /*************************************************************/
   /* Create an AF_INET stream socket to receive incoming       */
@@ -162,6 +167,16 @@ int main()
     close(listen_sd);
     exit(-1);
   }
+
+  // Print binder info
+  char hostname[HOST_NAME_MAX];
+  gethostname(hostname, HOST_NAME_MAX);
+  struct hostent *host;
+  struct in_addr **addresses;
+  host = gethostbyname(hostname);
+  addresses = (struct in_addr **)host->h_addr_list;
+  std::cout << "BINDER_ADDRESS " << inet_ntoa(*addresses[0]) << std::endl;
+  //printf("BINDER_PORT %d\n", port);
 
   /*************************************************************/
   /* Set the listen back log                                   */
@@ -342,13 +357,14 @@ int main()
                 /**********************************************/
                 /* Echo the data back to the client           */
                 /**********************************************/
-                rc = send(i, buffer, len, 0);
-                if (rc < 0)
-                {
-                   perror("  send() failed");
-                   close_conn = TRUE;
-                   break;
-                }
+                // TODO: Write behavior for client/server interaction.
+//                rc = send(i, buffer, len, 0);
+//                if (rc < 0)
+//                {
+//                   perror("  send() failed");
+//                   close_conn = TRUE;
+//                   break;
+//                }
 
              } while (TRUE);
 
@@ -385,6 +401,4 @@ int main()
     if (FD_ISSET(i, &master_set))
        close(i);
   }
-
-  // TODO: Use lock to prevent changes to PROCS from multiple threads at once.
 }
