@@ -13,6 +13,12 @@
 #include <netdb.h>
 #include <pthread.h>
 
+#include <iostream>
+
+// Just to make my cout << easier for now
+// Remove later
+using namespace std;
+
 int binderConnect(int *sock) {
     // Get binder address from env variables
     int binder_port;
@@ -49,6 +55,7 @@ int getSize(int type) {
 }
 
 int rpcCall(char* name, int* argTypes, void** args) {
+    cout << "rpcCall" << endl;
     int sock, arg_len;
     int ret = binderConnect(&sock);
     if (ret < 0)
@@ -239,18 +246,22 @@ int rpcInit(void) {
     addresses = (struct in_addr **) host->h_addr_list;
     strncpy(server_ip, inet_ntoa(*addresses[0]), 64);
 
+    cout << "Server IP: " << server_ip << endl;
+    cout << "Client port: " << client_port << endl;
+
     return 0;
 }
 
 int rpcRegister(char *name, int *argTypes, skeleton f) {
     // Alloc memory for saving in database later
     char *name_save = new char[PROC_NAME_SIZE];
+    cout << "rpcRegister" << endl;
 
     // Send REGISTER message
     int msg = htonl(REGISTER);
     send(sock_binder, (char*)&msg, sizeof(msg), 0);
     // Send server ip
-    send(sock_binder, server_ip, PROC_NAME_SIZE, 0);
+    send(sock_binder, server_ip, ADDR_SIZE, 0);
     // Send server port
     msg = htonl(client_port);
     send(sock_binder, (char*)&msg, sizeof(msg), 0);
@@ -400,6 +411,7 @@ void *connection_handler(void *socket_desc) {
 }
 
 int rpcExecute(void) {
+    cout << "rpcExecute" << endl;
     // If no registered functions, return
     if (database.size() == 0)
         return -1;
