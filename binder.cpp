@@ -16,6 +16,7 @@
 #include <vector>
 #include "rpc.h"
 #include "rpc_extra.h"
+#include "debug.h"
 
 /***
  * CLASSES/STRUCTS
@@ -75,7 +76,7 @@ Server *Proc::get_next_available_server()
 /***
  * BINDER
  ***/
-  
+
 // Maps a procedure name with a server
 void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
@@ -106,7 +107,7 @@ Server *get_proc_server(std::string proc_name)
   return PROCS[proc_name].get_next_available_server();
 }
 
-int main()
+int main(int argc, char *argv[])
 {
   int    i, len, rc, on = 1;
   int    listen_sd, max_sd, new_sd;
@@ -189,6 +190,7 @@ int main()
     printf("Waiting on select()...\n");
     rc = select(max_sd + 1, &working_set, NULL, NULL, NULL);
 
+
     if (rc < 0)
     {
        perror("  select() failed");
@@ -204,7 +206,8 @@ int main()
 
           if (i == listen_sd)
           {
-             printf("  Listening socket is readable\n");
+             DEBUG("Listening socket is readable.\n");
+
              do
              {
                 new_sd = accept(listen_sd, NULL, NULL);
@@ -218,7 +221,8 @@ int main()
                    break;
                 }
 
-                printf("  New incoming connection - %d\n", new_sd);
+                DEBUG("New incoming connection - %d\n", new_sd);
+               
                 FD_SET(new_sd, &master_set);
                 if (new_sd > max_sd)
                    max_sd = new_sd;
@@ -227,7 +231,7 @@ int main()
           else
           {
             bool close_conn = false;
-            printf("  Descriptor %d is readable\n", i);
+             DEBUG("Descriptor %d is readable\n", i);
             int type = -1;
             rc = recv(i, &type, sizeof(type), 0);
             if (rc < 0)
@@ -241,7 +245,7 @@ int main()
 
             if (rc == 0)
             {
-               printf("  Connection closed\n");
+               DEBUG("Connection closed\n");
                close_conn = true;
             }
 
@@ -254,6 +258,8 @@ int main()
                  while (FD_ISSET(max_sd, &master_set) == FALSE)
                     max_sd -= 1;
               }
+               
+
             }
 
             len = rc;
