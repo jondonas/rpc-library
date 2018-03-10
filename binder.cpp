@@ -4,8 +4,10 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
+#include <limits.h>
 #include <arpa/inet.h>
 #include <limits.h>
 #include <iostream>
@@ -42,6 +44,8 @@ class Proc
 
 #define TRUE             1
 #define FALSE            0
+
+#define HOST_NAME_MAX    255 // TODO: REMOVE THIS
 
 std::map<std::string, Proc> PROCS;
 Server *last_used_server = NULL;
