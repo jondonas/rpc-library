@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include <limits.h>
 #include <iostream>
-#include <string>
+#include <string.h>
 #include <map>
 #include <vector>
 
@@ -44,8 +44,6 @@ class Proc
 
 #define TRUE             1
 #define FALSE            0
-
-#define HOST_NAME_MAX    255 // TODO: REMOVE THIS
 
 std::map<std::string, Proc> PROCS;
 Server *last_used_server = NULL;
@@ -116,7 +114,7 @@ int main()
   char   buffer[80];
   struct sockaddr_in   addr;
   struct timeval       timeout;
-  struct fd_set        master_set, working_set;
+  fd_set        master_set, working_set;
   char   ip[INET_ADDRSTRLEN];
   uint16_t port;
 
