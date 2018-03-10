@@ -177,7 +177,12 @@ int main()
   host = gethostbyname(hostname);
   addresses = (struct in_addr **)host->h_addr_list;
   std::cout << "BINDER_ADDRESS " << inet_ntoa(*addresses[0]) << std::endl;
-  //printf("BINDER_PORT %d\n", port);
+  
+  struct sockaddr_in sin;
+  socklen_t addrlen = sizeof(sin);
+  getsockname(listen_sd, (struct sockaddr *)&sin, &addrlen);
+  int binder_port = ntohs(sin.sin_port);
+  std::cout << "BINDER_PORT " << binder_port << std::endl;
 
   /*************************************************************/
   /* Set the listen back log                                   */
@@ -349,11 +354,15 @@ int main()
             type = ntohl(type);
             switch (type) {
                 case REGISTER: {
-                    char server_ip[80], server_port[80], proc_name[80];
-                    int arg_type;
+                    char server_ip[ADDR_SIZE], proc_name[PROC_NAME_SIZE];
+                    char const *server_port;
+                    int arg_type, port;
                     std::string proc_signature;
                     recv(i, server_ip, sizeof(server_ip), 0);
-                    recv(i, server_port, sizeof(server_port), 0);
+                    // Receive port as int then convert to string
+                    recv(i, &port, sizeof(port), 0);
+                    port = ntohl(port);
+                    server_port = std::to_string(port).c_str();
                     recv(i, proc_name, sizeof(proc_name), 0);
                     proc_signature = proc_name;
                     do {
@@ -373,7 +382,7 @@ int main()
                     send(i, &msg, sizeof(msg), 0);
                 } break;
                 case LOC_REQUEST: {
-                    char proc_name[80];
+                    char proc_name[PROC_NAME_SIZE];
                     int arg_type;
                     std::string proc_signature;
                     recv(i, proc_name, sizeof(proc_name), 0);
@@ -391,11 +400,12 @@ int main()
                     if (server) {
                         msg = htonl(LOC_SUCCESS);
                         send(i, &msg, sizeof(msg), 0);
-                        char msg_s[80];
+                        char msg_s[ADDR_SIZE];
                         strcpy(msg_s, (server->ip).c_str());
                         send(i, msg_s, sizeof(msg_s), 0);
-                        strcpy(msg_s, (server->port).c_str());
-                        send(i, msg_s, sizeof(msg_s), 0);
+                        // Send port as int
+                        int port = htonl(std::stoi((server->port).c_str()));
+                        send(i, (char*)&port, sizeof(port), 0);
                     } else {
                         msg = htonl(LOC_FAILURE);
                         send(i, &msg, sizeof(msg), 0);
