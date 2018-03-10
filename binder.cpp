@@ -14,7 +14,8 @@
 #include <string.h>
 #include <map>
 #include <vector>
-
+#include "rpc.h"
+#include "rpc_extra.h"
 
 /***
  * CLASSES/STRUCTS
@@ -110,8 +111,6 @@ int main()
   int    i, len, rc, on = 1;
   int    listen_sd, max_sd, new_sd;
   int    desc_ready, end_server = FALSE;
-  int    close_conn;
-  char   buffer[80];
   struct sockaddr_in   addr;
   struct timeval       timeout;
   fd_set        master_set, working_set;
@@ -315,80 +314,111 @@ int main()
           else
           {
              printf("  Descriptor %d is readable\n", i);
-             close_conn = FALSE;
              /*************************************************/
              /* Receive all incoming data on this socket      */
              /* before we loop back and call select again.    */
              /*************************************************/
-             do
-             {
-                /**********************************************/
-                /* Receive data on this connection until the  */
-                /* recv fails with EWOULDBLOCK.  If any other */
-                /* failure occurs, we will close the          */
-                /* connection.                                */
-                /**********************************************/
-                rc = recv(i, buffer, sizeof(buffer), 0);
-                if (rc < 0)
-                {
-                   if (errno != EWOULDBLOCK)
-                   {
-                      perror("  recv() failed");
-                      close_conn = TRUE;
-                   }
-                   break;
-                }
+            int type = -1;
+            rc = recv(i, &type, sizeof(type), 0);
+            if (rc < 0)
+            {
+               if (errno != EWOULDBLOCK)
+               {
+                  perror("  recv() failed");
+                  // TODO: CLOSE CONNECTION
+               }
+            }
 
-                /**********************************************/
-                /* Check to see if the connection has been    */
-                /* closed by the client                       */
-                /**********************************************/
-                if (rc == 0)
-                {
-                   printf("  Connection closed\n");
-                   close_conn = TRUE;
-                   break;
-                }
+            /**********************************************/
+            /* Check to see if the connection has been    */
+            /* closed by the client                       */
+            /**********************************************/
+            if (rc == 0)
+            {
+               printf("  Connection closed\n");
+               // TODO: CLOSE CONNECTION
+            }
 
-                /**********************************************/
-                /* Data was received                          */
-                /**********************************************/
-                len = rc;
-                printf("  %d bytes received\n", len);
+            /**********************************************/
+            /* Data was received                          */
+            /**********************************************/
+            len = rc;
+            printf("  %d bytes received\n", len);
 
-                /**********************************************/
-                /* Echo the data back to the client           */
-                /**********************************************/
-                // TODO: Write behavior for client/server interaction.
-//                rc = send(i, buffer, len, 0);
-//                if (rc < 0)
-//                {
-//                   perror("  send() failed");
-//                   close_conn = TRUE;
-//                   break;
-//                }
+            // Determine message type
+            type = ntohl(type);
+            switch (type) {
+                case REGISTER: {
+                    char server_ip[80], server_port[80], proc_name[80];
+                    int arg_type;
+                    std::string proc_signature;
+                    recv(i, server_ip, sizeof(server_ip), 0);
+                    recv(i, server_port, sizeof(server_port), 0);
+                    recv(i, proc_name, sizeof(proc_name), 0);
+                    proc_signature = proc_name;
+                    do {
+                        recv(i, &arg_type, sizeof(arg_type), 0);
+                        arg_type = ntohl(arg_type);
+                        if (arg_type) {
+                            proc_signature += arg_type;
+                        }
+                    } while (arg_type != 0);
+                    register_proc_server(proc_signature, server_ip, server_port);
+                    // TODO: DETERMINE WHEN REGISTER_FAILURE
+                    int msg;
+                    msg = htonl(REGISTER_SUCCESS);
+                    send(i, &msg, sizeof(msg), 0);
+                    // TODO: DETERMINE WARNING/ERROR CODES FOR BOTH REGISTER_SUC and _FAIL
+                    msg = htonl(2);
+                    send(i, &msg, sizeof(msg), 0);
+                } break;
+                case LOC_REQUEST: {
+                    char proc_name[80];
+                    int arg_type;
+                    std::string proc_signature;
+                    recv(i, proc_name, sizeof(proc_name), 0);
+                    proc_signature = proc_name;
+                    do {
+                        recv(i, &arg_type, sizeof(arg_type), 0);
+                        arg_type = ntohl(arg_type);
+                        if (arg_type) {
+                            proc_signature += arg_type;
+                        }
+                    } while (arg_type != 0);
 
-             } while (TRUE);
+                    Server *server = get_proc_server(proc_signature);
+                    int msg;
+                    if (server) {
+                        msg = htonl(LOC_SUCCESS);
+                        send(i, &msg, sizeof(msg), 0);
+                        char msg_s[80];
+                        strcpy(msg_s, (server->ip).c_str());
+                        send(i, msg_s, sizeof(msg_s), 0);
+                        strcpy(msg_s, (server->port).c_str());
+                        send(i, msg_s, sizeof(msg_s), 0);
+                    } else {
+                        msg = htonl(LOC_FAILURE);
+                        send(i, &msg, sizeof(msg), 0);
+                        // TODO: DETERMINE ERROR CODES + DEFINE THEM IN SHARED HEADER
+                        msg = htonl(2);
+                        send(i, &msg, sizeof(msg), 0);
+                    }
+                } break;
+                case TERMINATE:
+                    break;
+                default:
+                    break;
+            }
 
-             /*************************************************/
-             /* If the close_conn flag was turned on, we need */
-             /* to clean up this active connection.  This     */
-             /* clean up process includes removing the        */
-             /* descriptor from the master set and            */
-             /* determining the new maximum descriptor value  */
-             /* based on the bits that are still turned on in */
-             /* the master set.                               */
-             /*************************************************/
-             if (close_conn)
-             {
-                close(i);
-                FD_CLR(i, &master_set);
-                if (i == max_sd)
-                {
-                   while (FD_ISSET(max_sd, &master_set) == FALSE)
-                      max_sd -= 1;
-                }
-             }
+            // Close socket connection
+            // TODO: SHOULD WE ALWAYS CLOSE CONNECTION ON SOCKET AFTER THIS?
+            close(i);
+            FD_CLR(i, &master_set);
+            if (i == max_sd)
+            {
+               while (FD_ISSET(max_sd, &master_set) == FALSE)
+                  max_sd -= 1;
+            }
           } /* End of existing connection is readable */
        } /* End of if (FD_ISSET(i, &working_set)) */
     } /* End of loop through selectable descriptors */
