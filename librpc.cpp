@@ -56,29 +56,29 @@ int rpcCall(char* name, int* argTypes, void** args) {
 
     // Send LOC_REQUEST message
     int msg = htonl(LOC_REQUEST);
-    send(sock, (char*)&msg, 4, 0);
+    send(sock, (char*)&msg, sizeof(msg), 0);
     // Send function name. Name is 64 bits. One extra bit for null terminator
     // TODO: test that I'm sending this right
-    char name_send[65];
-    strncpy(name_send, name, 64);
-    send(sock, name_send, 65, 0);
+    char name_send[PROC_NAME_SIZE];
+    strncpy(name_send, name, PROC_NAME_SIZE-1);
+    send(sock, name_send, PROC_NAME_SIZE, 0);
     // Send message
     int arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock, (char*)&msg, 4, 0);
+        send(sock, (char*)&msg, sizeof(msg), 0);
         ++arg_count;
     }
     // Terminator
     msg = 0;
-    send(sock, (char*)&msg, 4, 0);
+    send(sock, (char*)&msg, sizeof(msg), 0);
     arg_len = arg_count;
 
     // Receive response
     // IDK if we can assume byte order for sending??
     // I just encode and decode for now, but we can remove if it's safe
     int type;
-    recv(sock, &type, 4, 0);
+    recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
     if (type == LOC_FAILURE) {
         // Get error code and return
@@ -89,8 +89,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
     }
     // Else we have success
     // This assumes port is an integer at the end of the message and address is null terminated
-    char server_addr[65];
-    recv(sock, server_addr, 65, 0);
+    char server_addr[ADDR_SIZE];
+    recv(sock, server_addr, ADDR_SIZE, 0);
     int server_port;
     recv(sock, &server_port, 4, 0);
     server_port = ntohl(server_port);
@@ -111,20 +111,20 @@ int rpcCall(char* name, int* argTypes, void** args) {
     // This iterates through argTypes and sends the actual values found
     // at the arg
     msg = htonl(EXECUTE);
-    send(sock, (char*)&msg, 4, 0);
-    send(sock, name_send, 65, 0);
+    send(sock, (char*)&msg, sizeof(msg), 0);
+    send(sock, name_send, PROC_NAME_SIZE, 0);
     msg = htonl(arg_len);
-    send (sock, (char*)&msg, 4, 0);
+    send (sock, (char*)&msg, sizeof(msg), 0);
     // Send argTypes
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock, (char*)&msg, 4, 0);
+        send(sock, (char*)&msg, sizeof(msg), 0);
         ++arg_count;
     }
     // Terminator
     msg = 0;
-    send(sock, (char*)&msg, 4, 0);
+    send(sock, (char*)&msg, sizeof(msg), 0);
 
     // Send args
     arg_count = 0;
@@ -153,7 +153,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
     }
 
     // Receive execute response
-    recv(sock, &type, 4, 0);
+    recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
     if (type == EXECUTE_FAILURE) {
         // Get error code and return
@@ -201,7 +201,7 @@ int rpcTerminate(void) {
 
     // Send TERMINATE message
     int msg = htonl(TERMINATE);
-    send(sock, (char*)&msg, 4, 0);
+    send(sock, (char*)&msg, sizeof(msg), 0);
 
     return 0;
 }
@@ -244,33 +244,33 @@ int rpcInit(void) {
 
 int rpcRegister(char *name, int *argTypes, skeleton f) {
     // Alloc memory for saving in database later
-    char *name_save = new char[65];
+    char *name_save = new char[PROC_NAME_SIZE];
 
     // Send REGISTER message
     int msg = htonl(REGISTER);
-    send(sock_binder, (char*)&msg, 4, 0);
+    send(sock_binder, (char*)&msg, sizeof(msg), 0);
     // Send server ip
-    send(sock_binder, server_ip, 65, 0);
+    send(sock_binder, server_ip, PROC_NAME_SIZE, 0);
     // Send server port
     msg = htonl(client_port);
-    send(sock_binder, (char*)&msg, 4, 0);
+    send(sock_binder, (char*)&msg, sizeof(msg), 0);
     // Send function name
-    strncpy(name_save, name, 64);
-    send(sock_binder, name_save, 65, 0);
+    strncpy(name_save, name, PROC_NAME_SIZE-1);
+    send(sock_binder, name_save, PROC_NAME_SIZE, 0);
     // Send argTypes
     int arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock_binder, (char*)&msg, 4, 0);
+        send(sock_binder, (char*)&msg, sizeof(msg), 0);
         ++arg_count;
     }
     // Terminator
     msg = 0;
-    send(sock_binder, (char*)&msg, 4, 0);
+    send(sock_binder, (char*)&msg, sizeof(msg), 0);
 
     // Receive response
     int type;
-    recv(sock_binder, &type, 4, 0);
+    recv(sock_binder, &type, sizeof(type), 0);
     type = ntohl(type);
     // Get return code
     int status;
@@ -301,8 +301,8 @@ void *connection_handler(void *socket_desc) {
     int sock = *(int *)socket_desc;
 
     // Get function name
-    char name[65];
-    recv(sock, name, 65, 0);
+    char name[PROC_NAME_SIZE];
+    recv(sock, name, PROC_NAME_SIZE, 0);
 
     // Get argTypes
     int arg_len;
@@ -312,7 +312,7 @@ void *connection_handler(void *socket_desc) {
 
     for (int i = 0; i < arg_len; ++i) {
         int type;
-        recv(sock, &type, 4, 0);
+        recv(sock, &type, sizeof(type), 0);
         argTypes[i] = ntohl(type);
     }
 
@@ -413,7 +413,7 @@ int rpcExecute(void) {
         client = accept(sock_client, NULL, NULL);
         // Receive message type
         int type;
-        recv(client, &type, 4, 0);
+        recv(client, &type, sizeof(type), 0);
         type = ntohl(type);
 
         if (type == EXECUTE) {

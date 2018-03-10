@@ -9,3 +9,7 @@
 #define EXECUTE_SUCCESS     8
 #define EXECUTE_FAILURE     9
 #define TERMINATE           10
+
+#define PROC_NAME_SIZE      65
+#define ADDR_SIZE           65
+#define PORT_SIZE           20

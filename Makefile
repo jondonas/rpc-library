@@ -11,7 +11,7 @@ binder: binder.o
 	g++ -o binder binder.o
 
 binder.o: binder.cpp
-	g++ -c binder.cpp
+	g++ -c binder.cpp -std=c++11
 
 clean:
 	rm -f *.o
