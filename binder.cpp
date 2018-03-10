@@ -16,6 +16,7 @@
 #include <vector>
 #include "rpc.h"
 #include "rpc_extra.h"
+#include "debug.h"
 
 /***
  * CLASSES/STRUCTS
@@ -75,7 +76,7 @@ Server *Proc::get_next_available_server()
 /***
  * BINDER
  ***/
-  
+
 // Maps a procedure name with a server
 void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
@@ -106,7 +107,7 @@ Server *get_proc_server(std::string proc_name)
   return PROCS[proc_name].get_next_available_server();
 }
 
-int main()
+int main(int argc, char *argv[])
 {
   int    i, len, rc, on = 1;
   int    listen_sd, max_sd, new_sd;
@@ -223,7 +224,6 @@ int main()
     /**********************************************************/
     /* Call select() and wait 5 minutes for it to complete.   */
     /**********************************************************/
-    printf("Waiting on select()...\n");
     rc = select(max_sd + 1, &working_set, NULL, NULL, &timeout);
 
     /**********************************************************/
@@ -240,8 +240,8 @@ int main()
     /**********************************************************/
     if (rc == 0)
     {
-       printf("  select() timed out.  End program.\n");
-       break;
+        DEBUG("select() timed out. Program is closing.\n");
+        break;
     }
 
     /**********************************************************/
@@ -270,7 +270,7 @@ int main()
           /****************************************************/
           if (i == listen_sd)
           {
-             printf("  Listening socket is readable\n");
+             DEBUG("Listening socket is readable.\n");
              /*************************************************/
              /* Accept all incoming connections that are      */
              /* queued up on the listening socket before we   */
@@ -300,7 +300,7 @@ int main()
                 /* Add the new incoming connection to the     */
                 /* master read set                            */
                 /**********************************************/
-                printf("  New incoming connection - %d\n", new_sd);
+                DEBUG("New incoming connection - %d\n", new_sd);
                 FD_SET(new_sd, &master_set);
                 if (new_sd > max_sd)
                    max_sd = new_sd;
@@ -318,7 +318,7 @@ int main()
           /****************************************************/
           else
           {
-             printf("  Descriptor %d is readable\n", i);
+             DEBUG("Descriptor %d is readable\n", i);
              /*************************************************/
              /* Receive all incoming data on this socket      */
              /* before we loop back and call select again.    */
@@ -340,7 +340,7 @@ int main()
             /**********************************************/
             if (rc == 0)
             {
-               printf("  Connection closed\n");
+               DEBUG("Connection closed\n");
                // TODO: CLOSE CONNECTION
             }
 
@@ -348,7 +348,7 @@ int main()
             /* Data was received                          */
             /**********************************************/
             len = rc;
-            printf("  %d bytes received\n", len);
+            DEBUG("%d bytes received\n", len);
 
             // Determine message type
             type = ntohl(type);
