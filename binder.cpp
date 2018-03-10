@@ -14,7 +14,8 @@
 #include <string.h>
 #include <map>
 #include <vector>
-
+#include "rpc.h"
+#include "rpc_extra.h"
 
 /***
  * CLASSES/STRUCTS

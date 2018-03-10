@@ -1,5 +1,6 @@
 #include "rpc.h"
 #include "rpc_extra.h"
+#include "rpc_database.h"
 #include <arpa/inet.h>
 #include <cstdlib>
 #include <netinet/in.h>
