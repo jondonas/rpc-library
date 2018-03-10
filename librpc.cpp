@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <limits.h>
 #include <netdb.h>
+#include <pthread.h>
 
 int binderConnect(int *sock) {
     // Get binder address from env variables
@@ -37,8 +38,17 @@ int binderConnect(int *sock) {
     return 0;
 }
 
+int getSize(int type) {
+    if (type == ARG_CHAR) return sizeof(char);
+    else if (type == ARG_SHORT) return sizeof(short);
+    else if (type == ARG_INT) return sizeof(int);
+    else if (type == ARG_LONG) return sizeof(long);
+    else if (type == ARG_DOUBLE) return sizeof(double);
+    else if (type == ARG_FLOAT) return sizeof(float);
+}
+
 int rpcCall(char* name, int* argTypes, void** args) {
-    int sock;
+    int sock, arg_len;
     int ret = binderConnect(&sock);
     if (ret < 0)
         return ret;
@@ -61,6 +71,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
     // Terminator
     msg = 0;
     send(sock, (char*)&msg, 4, 0);
+    arg_len = arg_count;
 
     // Receive response
     // IDK if we can assume byte order for sending??
@@ -101,6 +112,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
     msg = htonl(EXECUTE);
     send(sock, (char*)&msg, 4, 0);
     send(sock, name_send, 65, 0);
+    msg = htonl(arg_len);
+    send (sock, (char*)&msg, 4, 0);
     // Send argTypes
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
@@ -113,35 +126,19 @@ int rpcCall(char* name, int* argTypes, void** args) {
     send(sock, (char*)&msg, 4, 0);
 
     // Send args
-    int output_len;
-    int output_array_len;
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         bool input = argTypes[arg_count] & 0x80000000;
-        bool output = argTypes[arg_count] & 0x40000000;
-
-        type = argTypes[arg_count] & 0xFF0000;
-        int array_len = argTypes[arg_count] & 0xFFFF;
-        int len;
-        // Get size of argument
-        if (type == ARG_CHAR) len = sizeof(char);
-        else if (type == ARG_SHORT) len = sizeof(short);
-        else if (type == ARG_INT) len = sizeof(int);
-        else if (type == ARG_LONG) len = sizeof(long);
-        else if (type == ARG_DOUBLE) len = sizeof(double);
-        else if (type == ARG_FLOAT) len = sizeof(float);
-
-        // Determine output type to save code duplication later
-        if (output) {
-            output_len = len;
-            output_array_len = array_len;
-        }
-
         // Only send args that are input to the server
         if (!input) {
             ++arg_count;
             continue;
         }
+
+        type = argTypes[arg_count] & 0xFF0000;
+        int array_len = argTypes[arg_count] & 0xFFFF;
+        // Get size of argument
+        int len = getSize(type);
 
         // Send elements of array
         if (array_len > 0) {
@@ -177,17 +174,33 @@ int rpcCall(char* name, int* argTypes, void** args) {
             continue;
         }
 
-        if (output_array_len > 0) {
-            for (int i = 0; i < output_array_len; ++i)
-                recv(sock, args[arg_count], output_len*output_array_len, 0);
+        type = argTypes[arg_count] & 0xFF0000;
+        int array_len = argTypes[arg_count] & 0xFFFF;
+        int len = getSize(type);
+
+        if (array_len > 0) {
+            recv(sock, args[arg_count], len*array_len, 0);
         }
         else
-            recv(sock, args[arg_count], output_len, 0);
+            recv(sock, args[arg_count], len, 0);
 
         break;
     }
 
     close(sock);
+
+    return 0;
+}
+
+int rpcTerminate(void) {
+    int sock;
+    int ret = binderConnect(&sock);
+    if (ret < 0)
+        return ret;
+
+    // Send TERMINATE message
+    int msg = htonl(TERMINATE);
+    send(sock, (char*)&msg, 4, 0);
 
     return 0;
 }
@@ -281,4 +294,136 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
 
     // status will be >= 0, so return it to include warnings
     return status;
+}
+
+void *connection_handler(void *socket_desc) {
+    int sock = *(int *)socket_desc;
+
+    // Get function name
+    char name[65];
+    recv(sock, name, 65, 0);
+
+    // Get argTypes
+    int arg_len;
+    recv(sock, &arg_len, 4, 0);
+    arg_len = ntohl(arg_len);
+    int *argTypes = new int[arg_len];
+
+    for (int i = 0; i < arg_len; ++i) {
+        int type;
+        recv(sock, &type, 4, 0);
+        argTypes[i] = ntohl(type);
+    }
+
+    // Check if function is registered
+    skeleton skel;
+    bool name_found = false, params_found = true;
+    for (auto &entry: database) {
+        // Check names match
+        if (strcmp(std::get<0>(entry), name) == 0)
+            name_found = true;
+        // Check params match
+        int arg_count = 0;
+        while (argTypes[arg_count] != 0 && std::get<1>(entry)[arg_count] != 0) {
+            int type1 = argTypes[arg_count] & 0xFF0000;
+            int type2 = std::get<1>(entry)[arg_count] & 0xFF0000;
+            if (type1 != type2) {
+                params_found = false;
+                break;
+            }
+            ++arg_count;
+        }
+        if (argTypes[arg_count] != 0 || std::get<1>(entry)[arg_count] != 0)
+            params_found = false;
+
+        if (name_found && params_found) {
+            skel = std::get<2>(entry);
+            break;
+        }
+        else {
+            name_found = false;
+            params_found = true;
+        }
+    }
+
+    if (!(name_found && params_found)) {
+        // Send error message to client? This situation might never happen
+    }
+
+    // Get args
+    void **args = new void*[arg_len];
+    for (int i = 0; i < arg_len; ++i) {
+        bool input = argTypes[i] & 0x80000000;
+        // Only receive args that are input to the server
+        if (!input) continue;
+
+        int type = argTypes[i] & 0xFF0000;
+        int array_len = argTypes[i] & 0xFFFF;
+        int len = getSize(type);
+
+        if (array_len == 0)
+            array_len = 1;
+
+        void *arg;
+        arg = malloc(len*array_len);
+        args[i] = arg;
+
+        recv(sock, args[i], len*array_len, 0);
+    }
+
+    // Run skeleton
+    skel(argTypes, args);
+
+    // Return result
+    for (int i = 0; i < arg_len; ++i) {
+        bool output = argTypes[i] & 0x40000000;
+
+        if (!output) continue;
+
+        int type = argTypes[i] & 0xFF0000;
+        int array_len = argTypes[i] & 0xFFFF;
+        int len = getSize(type);
+
+        if (array_len == 0)
+            array_len = 1;
+
+        send(sock, args[i], array_len*len, 0);
+    }
+
+    // Free memory
+    for (int i = 0; i < arg_len; ++i) free(args[i]);
+    delete args;
+    delete argTypes;
+
+    return 0;
+}
+
+int rpcExecute(void) {
+    // If no registered functions, return
+    if (database.size() == 0)
+        return -1;
+
+    int client;
+    listen(sock_client, 20);
+
+    // Listen for incoming connections and spawn threads
+    pthread_t t_connect;
+    while (true) {
+        client = accept(sock_client, NULL, NULL);
+        // Receive message type
+        int type;
+        recv(client, &type, 4, 0);
+        type = ntohl(type);
+
+        if (type == EXECUTE) {
+            // Serve the request
+            pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
+        }
+        else if (type == TERMINATE) {
+            // Terminate the server. This cuts-off all currently running threads
+            break;
+        }
+    }
+     
+    return 0;
 }
