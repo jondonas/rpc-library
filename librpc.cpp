@@ -15,6 +15,8 @@
 #include <iostream>
 #include "debug.h"
 
+#include <errno.h>
+
 int binderConnect(int *sock) {
     // Get binder address from env variables
     int binder_port;
@@ -129,21 +131,18 @@ int rpcCall(char* name, int* argTypes, void** args) {
         send(sock, &msg, sizeof(msg), 0);
         ++arg_count;
     }
-    // Terminator
-    msg = 0;
-    send(sock, &msg, sizeof(msg), 0);
 
     // Send args
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
-        bool input = argTypes[arg_count] & 0x80000000;
+        bool input = (argTypes[arg_count] >> 31) & 0x1;
         // Only send args that are input to the server
         if (!input) {
             ++arg_count;
             continue;
         }
 
-        type = argTypes[arg_count] & 0xFF0000;
+        type = (argTypes[arg_count] >> 16) & 0xFF;
         int array_len = argTypes[arg_count] & 0xFFFF;
         // Get size of argument
         int len = getSize(type);
@@ -170,21 +169,21 @@ int rpcCall(char* name, int* argTypes, void** args) {
         return err;
     }
 
-    DEBUG("rpcCall EXECUTE_SUCCESS\n");
+    DEBUG("rpcCall EXECUTE_SUCCESS: %d\n", type);
     // Else we have success
     // Success message format is different than assignment spec:
     //   EXECUTE_SUCCESS, args
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         // Only check for output arg. Assignment spec says there is only one
-        bool output = argTypes[arg_count] & 0x40000000;
+        bool output = (argTypes[arg_count] >> 30) & 0x1;
 
         if (!output) {
             ++arg_count;
             continue;
         }
 
-        type = argTypes[arg_count] & 0xFF0000;
+        type = (argTypes[arg_count] >> 16) & 0xFF;
         int array_len = argTypes[arg_count] & 0xFFFF;
         int len = getSize(type);
 
@@ -194,10 +193,12 @@ int rpcCall(char* name, int* argTypes, void** args) {
         else
             recv(sock, args[arg_count], len, 0);
 
-        break;
+        ++arg_count;
     }
 
     close(sock);
+
+    DEBUG("Done rpcCall\n");
 
     return 0;
 }
@@ -224,15 +225,18 @@ int rpcInit(void) {
     int on = 1;
     struct sockaddr_in address;
     sock_client = socket(AF_INET, SOCK_STREAM, 0);
-    setsockopt(sock_client, SOL_SOCKET,  SO_REUSEADDR, (char *)&on, sizeof(on));
-    ioctl(sock_client, FIONBIO, (char *)&on);
+    //setsockopt(sock_client, SOL_SOCKET,  SO_REUSEADDR, (char *)&on, sizeof(on));
+    //ioctl(sock_client, FIONBIO, (char *)&on);
+    DEBUG("sock_client created: %d\n", sock_client);
 
     // Bind socket
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(0);
-    bind(sock_client, (struct sockaddr *)&address, sizeof(address));
-    
+    ret = bind(sock_client, (struct sockaddr *)&address, sizeof(address));
+    if (ret >= 0)
+        DEBUG("sock_client bound\n");
+
     // Get client port
     struct sockaddr_in sin;
     socklen_t addrlen = sizeof(sin);
@@ -303,6 +307,7 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     argTypes_save[arg_count] = 0;
 
     database.push_back(std::make_tuple(name_save, argTypes_save, f));
+    DEBUG("Registered: %s %p\n", name_save, f);
 
     // status will be >= 0, so return it to include warnings
     return status;
@@ -310,10 +315,12 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
 
 void *connection_handler(void *socket_desc) {
     int sock = *(int *)socket_desc;
+    DEBUG("Socket: %d\n", sock);
 
     // Get function name
     char name[PROC_NAME_SIZE];
     recv(sock, name, PROC_NAME_SIZE, 0);
+    DEBUG("Running: %s\n", name);
 
     // Get argTypes
     int arg_len;
@@ -327,8 +334,6 @@ void *connection_handler(void *socket_desc) {
         argTypes[i] = ntohl(type);
     }
 
-    DEBUG("connection_handler\n");
-
     // Check if function is registered
     skeleton skel;
     bool name_found = false, params_found = true;
@@ -339,8 +344,8 @@ void *connection_handler(void *socket_desc) {
         // Check params match
         int arg_count = 0;
         while (argTypes[arg_count] != 0 && std::get<1>(entry)[arg_count] != 0) {
-            int type1 = argTypes[arg_count] & 0xFF0000;
-            int type2 = std::get<1>(entry)[arg_count] & 0xFF0000;
+            int type1 = (argTypes[arg_count] >> 16) & 0xFF;
+            int type2 = (std::get<1>(entry)[arg_count] >> 16) & 0xFF;
             if (type1 != type2) {
                 params_found = false;
                 break;
@@ -361,18 +366,16 @@ void *connection_handler(void *socket_desc) {
     }
 
     if (!(name_found && params_found)) {
-        DEBUG("connection_handler ERROR\n");
-        // Send error message to client? This situation might never happen
+        DEBUG("connection_handler NOT FOUND\n");
+        return NULL;
     }
+
+    DEBUG("Found: %s %p\n", name, skel);
 
     // Get args
     void **args = new void*[arg_len];
     for (int i = 0; i < arg_len; ++i) {
-        bool input = argTypes[i] & 0x80000000;
-        // Only receive args that are input to the server
-        if (!input) continue;
-
-        int type = argTypes[i] & 0xFF0000;
+        int type = (argTypes[i] >> 16) & 0xFF;
         int array_len = argTypes[i] & 0xFFFF;
         int len = getSize(type);
 
@@ -383,6 +386,10 @@ void *connection_handler(void *socket_desc) {
         arg = malloc(len*array_len);
         args[i] = arg;
 
+        bool input = (argTypes[i] >> 31) & 0x1;
+        // Only receive args that are input to the server
+        if (!input) continue;
+
         recv(sock, args[i], len*array_len, 0);
     }
 
@@ -391,13 +398,19 @@ void *connection_handler(void *socket_desc) {
     // Run skeleton
     skel(argTypes, args);
 
+    DEBUG("connection_handler SKELETON DONE\n");
+
+    // Return execute success
+    int msg = htonl(EXECUTE_SUCCESS);
+    send(sock, (char*)&msg, sizeof(msg), 0);
+
     // Return result
     for (int i = 0; i < arg_len; ++i) {
-        bool output = argTypes[i] & 0x40000000;
+        bool output = (argTypes[i] >> 30) & 0x1;
 
         if (!output) continue;
 
-        int type = argTypes[i] & 0xFF0000;
+        int type = (argTypes[i] >> 16) & 0xFF;
         int array_len = argTypes[i] & 0xFFFF;
         int len = getSize(type);
 
@@ -405,14 +418,16 @@ void *connection_handler(void *socket_desc) {
             array_len = 1;
 
         send(sock, args[i], array_len*len, 0);
-    }
+        break;
 
-    DEBUG("connection_handler RESULT SENT\n");
+    }
 
     // Free memory
     for (int i = 0; i < arg_len; ++i) free(args[i]);
     delete args;
     delete argTypes;
+
+    DEBUG("connection_handler RESULT SENT\n");
 
     return 0;
 }
@@ -425,11 +440,17 @@ int rpcExecute(void) {
 
     int client;
     listen(sock_client, 20);
+    DEBUG("listening on sock_client: %d\n", sock_client);
 
     // Listen for incoming connections and spawn threads
     pthread_t t_connect;
     while (true) {
         client = accept(sock_client, NULL, NULL);
+        if (client < 0) {
+            DEBUG("accept error: %s\n", strerror(errno));
+            break;
+        }
+        //DEBUG("client accepted: %d\n", client);
         // Receive message type
         int type;
         recv(client, &type, sizeof(type), 0);
