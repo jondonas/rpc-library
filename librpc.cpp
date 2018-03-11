@@ -327,6 +327,8 @@ void *connection_handler(void *socket_desc) {
         argTypes[i] = ntohl(type);
     }
 
+    DEBUG("connection_handler\n");
+
     // Check if function is registered
     skeleton skel;
     bool name_found = false, params_found = true;
@@ -359,6 +361,7 @@ void *connection_handler(void *socket_desc) {
     }
 
     if (!(name_found && params_found)) {
+        DEBUG("connection_handler ERROR\n");
         // Send error message to client? This situation might never happen
     }
 
@@ -383,6 +386,8 @@ void *connection_handler(void *socket_desc) {
         recv(sock, args[i], len*array_len, 0);
     }
 
+    DEBUG("connection_handler RUN SKELETON\n");
+
     // Run skeleton
     skel(argTypes, args);
 
@@ -401,6 +406,8 @@ void *connection_handler(void *socket_desc) {
 
         send(sock, args[i], array_len*len, 0);
     }
+
+    DEBUG("connection_handler RESULT SENT\n");
 
     // Free memory
     for (int i = 0; i < arg_len; ++i) free(args[i]);
@@ -430,6 +437,7 @@ int rpcExecute(void) {
 
         if (type == EXECUTE) {
             // Serve the request
+            DEBUG("rpcExecute EXECUTE\n");
             pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
         }
         else if (type == TERMINATE) {
