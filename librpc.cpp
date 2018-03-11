@@ -108,6 +108,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
     server.sin_port = htons(server_port);
     inet_pton(AF_INET, server_addr, &server.sin_addr);
   
+    sock = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
         // Couldn't connect to server
         return -3;
