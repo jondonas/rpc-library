@@ -47,7 +47,7 @@ class Proc
 #define TRUE             1
 #define FALSE            0
 
-std::map<std::string, Proc> PROCS;
+std::map<std::string, Proc *> PROCS;
 Server *last_used_server = NULL;
 
 /***
@@ -81,16 +81,26 @@ Server *Proc::get_next_available_server()
 void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
     Server server(server_ip, server_port);
-    Proc proc = PROCS[proc_name];
-    proc.servers.push_back(server);
+    Proc *proc = NULL;
+    try
+    {
+        proc = PROCS.at(proc_name);
+    }
+    catch (std::out_of_range e)
+    {
+        proc = new Proc();
+        PROCS[proc_name] = proc;
+    }
+    // TODO: Remove existing server with same IP
+    proc->servers.push_back(server);
 }
 
 // Removes a mapping between a procedure name and a server
 void remove_proc_server(std::string server_ip)
 {
-    for (std::map<std::string, Proc>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
+    for (std::map<std::string, Proc *>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
     {
-        std::vector<Server> proc_servers = it->second.servers;
+        std::vector<Server> proc_servers = it->second->servers;
         for (int i = 0; i < proc_servers.size(); ++i)
         {
             if (proc_servers[i].ip == server_ip)
@@ -104,7 +114,16 @@ void remove_proc_server(std::string server_ip)
 // Returns the next available server for a given procedure name, otherwise returns NULL.
 Server *get_proc_server(std::string proc_name)
 {
-    return PROCS[proc_name].get_next_available_server();
+    Server *server = NULL;
+    try
+    {
+       Proc *proc = PROCS.at(proc_name);
+       server = proc->get_next_available_server();
+    }
+    catch (std::out_of_range e)
+    {
+    }
+    return server;
 }
 
 int main(int argc, char *argv[])
@@ -268,14 +287,11 @@ int main(int argc, char *argv[])
                         case REGISTER: 
                             {
                                 char server_ip[ADDR_SIZE], proc_name[PROC_NAME_SIZE];
-                                char const *server_port;
-                                int arg_type, port;
+                                int arg_type, server_port;
                                 std::string proc_signature;
                                 recv(i, server_ip, sizeof(server_ip), 0);
-                                // Receive port as int then convert to string
-                                recv(i, &port, sizeof(port), 0);
-                                port = ntohl(port);
-                                server_port = std::to_string(port).c_str();
+                                recv(i, &server_port, sizeof(server_port), 0);
+                                server_port = ntohl(server_port);
                                 recv(i, proc_name, sizeof(proc_name), 0);
                                 proc_signature = proc_name;
                                 do
@@ -287,8 +303,8 @@ int main(int argc, char *argv[])
                                         proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                DEBUG("REGISTER: proc: %s, ip: %s, port: %d\n", proc_signature, server_ip, server_port);
-                                register_proc_server(proc_signature, server_ip, server_port);
+                                DEBUG("REGISTER: proc: %s, ip: %s, port: %d\n", proc_signature.c_str(), server_ip, server_port);
+                                register_proc_server(proc_signature, server_ip, std::to_string(server_port));
                                 // TODO: DETERMINE WHEN REGISTER_FAILURE
                                 int msg;
                                 msg = htonl(REGISTER_SUCCESS);
@@ -313,7 +329,7 @@ int main(int argc, char *argv[])
                                         proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-
+                                DEBUG("LOC_REQUEST: proc: %s\n", proc_signature.c_str());
                                 Server *server = get_proc_server(proc_signature);
                                 int msg;
                                 if (server)
@@ -337,6 +353,7 @@ int main(int argc, char *argv[])
                                 }
                             } break;
                         case TERMINATE:
+                            // TODO: Send message to all servers
                             break;
                         default:
                             break;
@@ -344,7 +361,6 @@ int main(int argc, char *argv[])
                 }
             }
         }
-
     } while (end_server == FALSE);
 
     for (i=0; i <= max_sd; ++i)

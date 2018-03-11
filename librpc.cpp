@@ -12,12 +12,8 @@
 #include <limits.h>
 #include <netdb.h>
 #include <pthread.h>
-
 #include <iostream>
-
-// Just to make my cout << easier for now
-// Remove later
-using namespace std;
+#include "debug.h"
 
 int binderConnect(int *sock) {
     // Get binder address from env variables
@@ -55,7 +51,7 @@ int getSize(int type) {
 }
 
 int rpcCall(char* name, int* argTypes, void** args) {
-    cout << "rpcCall" << endl;
+    DEBUG("rpcCall\n");
     int sock, arg_len;
     int ret = binderConnect(&sock);
     if (ret < 0)
@@ -88,6 +84,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
     recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
     if (type == LOC_FAILURE) {
+        DEBUG("rpcCall LOC_FAILURE\n");
         // Get error code and return
         int err;
         recv(sock, &err, 4, 0);
@@ -103,12 +100,15 @@ int rpcCall(char* name, int* argTypes, void** args) {
     server_port = ntohl(server_port);
     close(sock);
 
+    DEBUG("rpcCall SERVER_ADDRESS: %s, SERVER_PORT: %d\n", server_addr, server_port);
+
     // Connect to server
     struct sockaddr_in server;
     server.sin_family = AF_INET;
     server.sin_port = htons(server_port);
     inet_pton(AF_INET, server_addr, &server.sin_addr);
   
+    sock = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
         // Couldn't connect to server
         return -3;
@@ -118,20 +118,20 @@ int rpcCall(char* name, int* argTypes, void** args) {
     // This iterates through argTypes and sends the actual values found
     // at the arg
     msg = htonl(EXECUTE);
-    send(sock, (char*)&msg, sizeof(msg), 0);
+    send(sock, &msg, sizeof(msg), 0);
     send(sock, name_send, PROC_NAME_SIZE, 0);
     msg = htonl(arg_len);
-    send (sock, (char*)&msg, sizeof(msg), 0);
+    send (sock, &msg, sizeof(msg), 0);
     // Send argTypes
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock, (char*)&msg, sizeof(msg), 0);
+        send(sock, &msg, sizeof(msg), 0);
         ++arg_count;
     }
     // Terminator
     msg = 0;
-    send(sock, (char*)&msg, sizeof(msg), 0);
+    send(sock, &msg, sizeof(msg), 0);
 
     // Send args
     arg_count = 0;
@@ -169,6 +169,8 @@ int rpcCall(char* name, int* argTypes, void** args) {
         err = ntohl(err);
         return err;
     }
+
+    DEBUG("rpcCall EXECUTE_SUCCESS\n");
     // Else we have success
     // Success message format is different than assignment spec:
     //   EXECUTE_SUCCESS, args
@@ -245,26 +247,24 @@ int rpcInit(void) {
     host = gethostbyname(hostname);
     addresses = (struct in_addr **) host->h_addr_list;
     strncpy(server_ip, inet_ntoa(*addresses[0]), 64);
-
-    cout << "Server IP: " << server_ip << endl;
-    cout << "Client port: " << client_port << endl;
-
+    DEBUG("SERVER_ADDRESS: %s\n", server_ip);
+    DEBUG("CLIENT_PORT: %d\n", client_port);
     return 0;
 }
 
 int rpcRegister(char *name, int *argTypes, skeleton f) {
+    DEBUG("rpcRegister\n");
     // Alloc memory for saving in database later
     char *name_save = new char[PROC_NAME_SIZE];
-    cout << "rpcRegister" << endl;
 
     // Send REGISTER message
     int msg = htonl(REGISTER);
-    send(sock_binder, (char*)&msg, sizeof(msg), 0);
+    send(sock_binder, &msg, sizeof(msg), 0);
     // Send server ip
     send(sock_binder, server_ip, ADDR_SIZE, 0);
     // Send server port
     msg = htonl(client_port);
-    send(sock_binder, (char*)&msg, sizeof(msg), 0);
+    send(sock_binder, &msg, sizeof(msg), 0);
     // Send function name
     strncpy(name_save, name, PROC_NAME_SIZE-1);
     send(sock_binder, name_save, PROC_NAME_SIZE, 0);
@@ -272,7 +272,7 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     int arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock_binder, (char*)&msg, sizeof(msg), 0);
+        send(sock_binder, &msg, sizeof(msg), 0);
         ++arg_count;
     }
     // Terminator
@@ -327,6 +327,8 @@ void *connection_handler(void *socket_desc) {
         argTypes[i] = ntohl(type);
     }
 
+    DEBUG("connection_handler\n");
+
     // Check if function is registered
     skeleton skel;
     bool name_found = false, params_found = true;
@@ -359,6 +361,7 @@ void *connection_handler(void *socket_desc) {
     }
 
     if (!(name_found && params_found)) {
+        DEBUG("connection_handler ERROR\n");
         // Send error message to client? This situation might never happen
     }
 
@@ -383,6 +386,8 @@ void *connection_handler(void *socket_desc) {
         recv(sock, args[i], len*array_len, 0);
     }
 
+    DEBUG("connection_handler RUN SKELETON\n");
+
     // Run skeleton
     skel(argTypes, args);
 
@@ -402,6 +407,8 @@ void *connection_handler(void *socket_desc) {
         send(sock, args[i], array_len*len, 0);
     }
 
+    DEBUG("connection_handler RESULT SENT\n");
+
     // Free memory
     for (int i = 0; i < arg_len; ++i) free(args[i]);
     delete args;
@@ -411,7 +418,7 @@ void *connection_handler(void *socket_desc) {
 }
 
 int rpcExecute(void) {
-    cout << "rpcExecute" << endl;
+    DEBUG("rpcExecute\n");
     // If no registered functions, return
     if (database.size() == 0)
         return -1;
@@ -430,6 +437,7 @@ int rpcExecute(void) {
 
         if (type == EXECUTE) {
             // Serve the request
+            DEBUG("rpcExecute EXECUTE\n");
             pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
         }
         else if (type == TERMINATE) {
