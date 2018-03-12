@@ -98,6 +98,7 @@ void register_proc_server(std::string proc_name, std::string server_ip, std::str
 // Removes a mapping between a procedure name and a server
 void remove_proc_server(std::string server_ip)
 {
+    int initial_procs_len = PROCS.size();
     for (std::map<std::string, Proc *>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
     {
         std::vector<Server> proc_servers = it->second->servers;
@@ -108,7 +109,15 @@ void remove_proc_server(std::string server_ip)
                 proc_servers.erase(proc_servers.begin() + i);
             }
         }
+
+        it->second->servers = proc_servers;
+
+        if (proc_servers.size() == 0)
+        {
+            PROCS.erase(it);
+        }
     }  
+    DEBUG("PROCS: Initial size %d, final size %d\n", initial_procs_len, PROCS.size());
 }
 
 // Returns the next available server for a given procedure name, otherwise returns NULL.
@@ -204,7 +213,6 @@ int main(int argc, char *argv[])
     do
     {
         memcpy(&working_set, &master_set, sizeof(master_set));
-        DEBUG("Waiting on select()...\n");
         rc = select(max_sd + 1, &working_set, NULL, NULL, NULL);
 
         if (rc < 0)
@@ -222,8 +230,6 @@ int main(int argc, char *argv[])
 
                 if (i == listen_sd)
                 {
-                    DEBUG("Listening socket is readable.\n");
-
                     do
                     {
                         new_sd = accept(listen_sd, NULL, NULL);
@@ -237,8 +243,6 @@ int main(int argc, char *argv[])
                             break;
                         }
 
-                        DEBUG("New incoming connection - %d\n", new_sd);
-
                         FD_SET(new_sd, &master_set);
                         if (new_sd > max_sd)
                             max_sd = new_sd;
@@ -247,7 +251,6 @@ int main(int argc, char *argv[])
                 else
                 {
                     bool close_conn = false;
-                    DEBUG("Descriptor %d is readable\n", i);
                     int type = -1;
                     rc = recv(i, &type, sizeof(type), 0);
                     if (rc < 0)
@@ -261,11 +264,22 @@ int main(int argc, char *argv[])
 
                     if (rc == 0)
                     {
-                        DEBUG("Connection closed\n");
+                        DEBUG("SERVER(%d): Connection closed\n", i);
                         close_conn = true;
                     }
 
                     if (close_conn) {
+                        // Remove all proc mappings from server
+                        struct sockaddr server_addr;
+                        socklen_t server_addr_len = sizeof(server_addr);
+                        int result = getpeername(i, &server_addr, &server_addr_len);
+                        if (result == 0) {
+                            struct sockaddr_in *server_addr_in = (struct sockaddr_in *)&server_addr;
+                            std::string server_ip = inet_ntoa(server_addr_in->sin_addr);
+                            DEBUG("SERVER(%d): Removing proc mappings, ip: %s\n", i, server_ip.c_str());
+                            remove_proc_server(server_ip);
+                        }
+
                         // Close socket connection
                         close(i);
                         FD_CLR(i, &master_set);
@@ -307,7 +321,7 @@ int main(int argc, char *argv[])
                                             proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                DEBUG("REGISTER: proc: %s, ip: %s, port: %d\n", proc_signature.c_str(), server_ip, server_port);
+                                DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
                                 register_proc_server(proc_signature, server_ip, std::to_string(server_port));
                                 // TODO: DETERMINE WHEN REGISTER_FAILURE
                                 int msg;
@@ -337,7 +351,7 @@ int main(int argc, char *argv[])
                                             proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                DEBUG("LOC_REQUEST: proc: %s\n", proc_signature.c_str());
+                                DEBUG("LOC_REQUEST(%d): proc: %s\n", i, proc_signature.c_str());
                                 Server *server = get_proc_server(proc_signature);
                                 int msg;
                                 if (server)
