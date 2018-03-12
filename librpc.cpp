@@ -15,8 +15,6 @@
 #include <iostream>
 #include "debug.h"
 
-#include <errno.h>
-
 int binderConnect(int *sock) {
     // Get binder address from env variables
     int binder_port;
@@ -44,6 +42,7 @@ int binderConnect(int *sock) {
 }
 
 int getSize(int type) {
+    // Get size (int bytes) of primitive type
     if (type == ARG_CHAR) return sizeof(char);
     else if (type == ARG_SHORT) return sizeof(short);
     else if (type == ARG_INT) return sizeof(int);
@@ -62,8 +61,7 @@ int rpcCall(char* name, int* argTypes, void** args) {
     // Send LOC_REQUEST message
     int msg = htonl(LOC_REQUEST);
     send(sock, (char*)&msg, sizeof(msg), 0);
-    // Send function name. Name is 64 bits. One extra bit for null terminator
-    // TODO: test that I'm sending this right
+    // Send function name
     char name_send[PROC_NAME_SIZE];
     strncpy(name_send, name, PROC_NAME_SIZE-1);
     send(sock, name_send, PROC_NAME_SIZE, 0);
@@ -80,8 +78,6 @@ int rpcCall(char* name, int* argTypes, void** args) {
     arg_len = arg_count;
 
     // Receive response
-    // IDK if we can assume byte order for sending??
-    // I just encode and decode for now, but we can remove if it's safe
     int type;
     recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
@@ -94,7 +90,6 @@ int rpcCall(char* name, int* argTypes, void** args) {
         return err;
     }
     // Else we have success
-    // This assumes port is an integer at the end of the message and address is null terminated
     char server_addr[ADDR_SIZE];
     recv(sock, server_addr, ADDR_SIZE, 0);
     int server_port;
@@ -171,11 +166,9 @@ int rpcCall(char* name, int* argTypes, void** args) {
 
     DEBUG("rpcCall EXECUTE_SUCCESS: %d\n", type);
     // Else we have success
-    // Success message format is different than assignment spec:
-    //   EXECUTE_SUCCESS, args
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
-        // Only check for output arg. Assignment spec says there is only one
+        // Only check for output args
         bool output = (argTypes[arg_count] >> 30) & 0x1;
 
         if (!output) {
@@ -225,8 +218,6 @@ int rpcInit(void) {
     int on = 1;
     struct sockaddr_in address;
     sock_client = socket(AF_INET, SOCK_STREAM, 0);
-    //setsockopt(sock_client, SOL_SOCKET,  SO_REUSEADDR, (char *)&on, sizeof(on));
-    //ioctl(sock_client, FIONBIO, (char *)&on);
     DEBUG("sock_client created: %d\n", sock_client);
 
     // Bind socket
@@ -254,6 +245,39 @@ int rpcInit(void) {
     DEBUG("SERVER_ADDRESS: %s\n", server_ip);
     DEBUG("CLIENT_PORT: %d\n", client_port);
     return 0;
+}
+
+int findEntryDB(char *name, int *argTypes) {
+    // Returns the index of duplicate entry. -1 otherwise
+    bool name_found = false, params_found = true;
+    for (int i = 0; i < database.size(); ++i) {
+        if (strcmp(std::get<0>(database[i]), name) == 0)
+            name_found = true;
+        // Check params match
+        int arg_count = 0;
+        while (argTypes[arg_count] != 0 && std::get<1>(database[i])[arg_count] != 0) {
+            int type1 = (argTypes[arg_count] >> 16) & 0xFF;
+            int type2 = (std::get<1>(database[i])[arg_count] >> 16) & 0xFF;
+            DEBUG("type1: %d - type2: %d\n", type1, type2);
+
+            if (type1 != type2) {
+                params_found = false;
+                break;
+            }
+            ++arg_count;
+        }
+        if (argTypes[arg_count] != 0 || std::get<1>(database[i])[arg_count] != 0)
+            params_found = false;
+
+        if (name_found && params_found)
+            return i;
+        else {
+            name_found = false;
+            params_found = true;
+        }
+    }
+
+    return -1;
 }
 
 int rpcRegister(char *name, int *argTypes, skeleton f) {
@@ -298,7 +322,7 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     }
     // Else we have success. Register function in local database
     // Alloc space to copy over deets
-    int *argTypes_save = new int[arg_count];
+    int *argTypes_save = new int[arg_count+1];
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
         argTypes_save[arg_count] = argTypes[arg_count];
@@ -306,11 +330,24 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     }
     argTypes_save[arg_count] = 0;
 
+    // Delete any duplicate entry
+    int index = findEntryDB(name_save, argTypes_save);
+    if (index >= 0)
+        database.erase(database.begin() + index);
+
+    // Add new entry
     database.push_back(std::make_tuple(name_save, argTypes_save, f));
     DEBUG("Registered: %s %p\n", name_save, f);
 
     // status will be >= 0, so return it to include warnings
     return status;
+}
+
+void sendExecFailure(int sock, int errcode) {
+    int msg = htonl(EXECUTE_FAILURE);
+    send(sock, (char*)&msg, sizeof(msg), 0);
+    msg = htonl(errcode);
+    send(sock, (char*)&msg, sizeof(msg), 0);
 }
 
 void *connection_handler(void *socket_desc) {
@@ -326,47 +363,24 @@ void *connection_handler(void *socket_desc) {
     int arg_len;
     recv(sock, &arg_len, 4, 0);
     arg_len = ntohl(arg_len);
-    int *argTypes = new int[arg_len];
+    int *argTypes = new int[arg_len+1];
 
     for (int i = 0; i < arg_len; ++i) {
         int type;
         recv(sock, &type, sizeof(type), 0);
         argTypes[i] = ntohl(type);
     }
+    argTypes[arg_len] = 0;
 
     // Check if function is registered
     skeleton skel;
-    bool name_found = false, params_found = true;
-    for (auto &entry: database) {
-        // Check names match
-        if (strcmp(std::get<0>(entry), name) == 0)
-            name_found = true;
-        // Check params match
-        int arg_count = 0;
-        while (argTypes[arg_count] != 0 && std::get<1>(entry)[arg_count] != 0) {
-            int type1 = (argTypes[arg_count] >> 16) & 0xFF;
-            int type2 = (std::get<1>(entry)[arg_count] >> 16) & 0xFF;
-            if (type1 != type2) {
-                params_found = false;
-                break;
-            }
-            ++arg_count;
-        }
-        if (argTypes[arg_count] != 0 || std::get<1>(entry)[arg_count] != 0)
-            params_found = false;
-
-        if (name_found && params_found) {
-            skel = std::get<2>(entry);
-            break;
-        }
-        else {
-            name_found = false;
-            params_found = true;
-        }
-    }
-
-    if (!(name_found && params_found)) {
+    int index = findEntryDB(name, argTypes);
+    if (index >= 0)
+        skel = std::get<2>(database[index]);
+    else {
+        delete argTypes;
         DEBUG("connection_handler NOT FOUND\n");
+        sendExecFailure(sock, -4);
         return NULL;
     }
 
@@ -396,7 +410,17 @@ void *connection_handler(void *socket_desc) {
     DEBUG("connection_handler RUN SKELETON\n");
 
     // Run skeleton
-    skel(argTypes, args);
+    int ret = skel(argTypes, args);
+
+    if (ret < 0) {
+        // Send EXECUTE FAILURE
+        for (int i = 0; i < arg_len; ++i) free(args[i]);
+        delete args;
+        delete argTypes;
+        DEBUG("connection_handler SKEL ERROR\n");
+        sendExecFailure(sock, -5);
+        return NULL;
+    }
 
     DEBUG("connection_handler SKELETON DONE\n");
 
@@ -446,11 +470,6 @@ int rpcExecute(void) {
     pthread_t t_connect;
     while (true) {
         client = accept(sock_client, NULL, NULL);
-        if (client < 0) {
-            DEBUG("accept error: %s\n", strerror(errno));
-            break;
-        }
-        //DEBUG("client accepted: %d\n", client);
         // Receive message type
         int type;
         recv(client, &type, sizeof(type), 0);
@@ -462,6 +481,11 @@ int rpcExecute(void) {
             pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
         }
         else if (type == TERMINATE) {
+            // Free memory
+            for (auto &entry: database) {
+                delete std::get<0>(entry);
+                delete std::get<1>(entry);
+            }
             // Terminate the server. This cuts-off all currently running threads
             break;
         }
