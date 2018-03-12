@@ -442,7 +442,6 @@ void *connection_handler(void *socket_desc) {
             array_len = 1;
 
         send(sock, args[i], array_len*len, 0);
-        break;
 
     }
 
