@@ -91,8 +91,23 @@ void register_proc_server(std::string proc_name, std::string server_ip, std::str
         proc = new Proc();
         PROCS[proc_name] = proc;
     }
-    // TODO: Remove existing server with same IP
-    proc->servers.push_back(server);
+
+    // Avoid adding existing proc-server mapping
+    bool found_proc_server = false;
+    std::vector<Server> proc_servers = proc->servers;
+    for (int i = 0; i < proc_servers.size(); ++i)
+    {
+        if (proc_servers[i].ip == server_ip && proc_servers[i].port == server_port)
+        {
+            found_proc_server = true;
+            break;
+        }
+    }
+
+    if (!found_proc_server)
+    {
+        proc->servers.push_back(server);
+    }
 }
 
 // Removes a mapping between a procedure name and a server
