@@ -16,7 +16,10 @@
 #include <vector>
 #include "rpc.h"
 #include "rpc_extra.h"
+#include "rpc_errors.h"
 #include "debug.h"
+
+#define SERVER_PORT_KEY(ip, port) (ip + std::to_string(port))
 
 /***
  * CLASSES/STRUCTS
@@ -111,7 +114,7 @@ void register_proc_server(std::string proc_name, std::string server_ip, std::str
 }
 
 // Removes a mapping between a procedure name and a server
-void remove_proc_server(std::string server_ip)
+void remove_proc_server(std::string server_ip, std::string server_port)
 {
     int initial_procs_len = PROCS.size();
     for (std::map<std::string, Proc *>::iterator it = PROCS.begin(); it != PROCS.end(); ++it)
@@ -119,7 +122,7 @@ void remove_proc_server(std::string server_ip)
         std::vector<Server> proc_servers = it->second->servers;
         for (int i = 0; i < proc_servers.size(); ++i)
         {
-            if (proc_servers[i].ip == server_ip)
+            if (proc_servers[i].ip == server_ip && proc_servers[i].port == server_port)
             {
                 proc_servers.erase(proc_servers.begin() + i);
             }
@@ -160,6 +163,7 @@ int main(int argc, char *argv[])
     fd_set master_set, working_set;
     char ip[INET_ADDRSTRLEN];
     uint16_t port;
+    std::map<std::string, int> server_ports;
 
     listen_sd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sd < 0)
@@ -291,8 +295,18 @@ int main(int argc, char *argv[])
                         if (result == 0) {
                             struct sockaddr_in *server_addr_in = (struct sockaddr_in *)&server_addr;
                             std::string server_ip = inet_ntoa(server_addr_in->sin_addr);
-                            DEBUG("SERVER(%d): Removing proc mappings, ip: %s\n", i, server_ip.c_str());
-                            remove_proc_server(server_ip);
+                            int server_socket_port = ntohs(server_addr_in->sin_port);
+                            try
+                            {
+                                std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
+                                int server_port = server_ports.at(key);
+                                DEBUG("SERVER(%d): Removing proc mappings, ip: %s, port: %d\n", i, server_ip.c_str(), server_port);
+                                remove_proc_server(server_ip, std::to_string(server_port));
+                                server_ports.erase(key);
+                            }
+                            catch (std::out_of_range e)
+                            {
+                            }
                         }
 
                         // Close socket connection
@@ -336,15 +350,32 @@ int main(int argc, char *argv[])
                                             proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
-                                register_proc_server(proc_signature, server_ip, std::to_string(server_port));
-                                // TODO: DETERMINE WHEN REGISTER_FAILURE
+
+                                // Register server ip to <socket_port, client_port> map
+                                struct sockaddr server_addr;
+                                socklen_t server_addr_len = sizeof(server_addr);
+                                int result = getpeername(i, &server_addr, &server_addr_len);
                                 int msg;
-                                msg = htonl(REGISTER_SUCCESS);
-                                send(i, &msg, sizeof(msg), 0);
-                                // TODO: DETERMINE WARNING/ERROR CODES FOR BOTH REGISTER_SUC and _FAIL
-                                msg = htonl(2);
-                                send(i, &msg, sizeof(msg), 0);
+                                if (result == 0)
+                                {
+                                    struct sockaddr_in *server_addr_in = (struct sockaddr_in *)&server_addr;
+                                    int server_socket_port = ntohs(server_addr_in->sin_port);
+                                    std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
+                                    server_ports[key] = server_port;
+                                    register_proc_server(proc_signature, server_ip, std::to_string(server_port));
+                                    DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
+                                    msg = htonl(REGISTER_SUCCESS);
+                                    send(i, &msg, sizeof(msg), 0);
+                                    msg = htonl(REGISTER_SUCCESS_NO_ERROR);
+                                    send(i, &msg, sizeof(msg), 0);
+                                }
+                                else
+                                {
+                                    msg = htonl(REGISTER_FAILURE);
+                                    send(i, &msg, sizeof(msg), 0);
+                                    msg = htonl(REGISTER_FAILURE_ERROR_MAP);
+                                    send(i, &msg, sizeof(msg), 0);
+                                }
                             } break;
                         case LOC_REQUEST:
                             {
@@ -366,7 +397,6 @@ int main(int argc, char *argv[])
                                             proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                DEBUG("LOC_REQUEST(%d): proc: %s\n", i, proc_signature.c_str());
                                 Server *server = get_proc_server(proc_signature);
                                 int msg;
                                 if (server)
@@ -376,17 +406,17 @@ int main(int argc, char *argv[])
                                     char msg_s[ADDR_SIZE];
                                     strcpy(msg_s, (server->ip).c_str());
                                     send(i, msg_s, sizeof(msg_s), 0);
-                                    // Send port as int
                                     int port = htonl(std::stoi((server->port).c_str()));
                                     send(i, (char*)&port, sizeof(port), 0);
+                                    DEBUG("LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (server->ip).c_str(), (server->port).c_str());
                                 }
                                 else
                                 {
                                     msg = htonl(LOC_FAILURE);
                                     send(i, &msg, sizeof(msg), 0);
-                                    // TODO: DETERMINE ERROR CODES + DEFINE THEM IN SHARED HEADER
-                                    msg = htonl(2);
+                                    msg = htonl(LOC_FAILURE_ERROR_NO_SERVER);
                                     send(i, &msg, sizeof(msg), 0);
+                                    DEBUG("LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
                                 }
                             } break;
                         case TERMINATE:
