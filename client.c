@@ -152,6 +152,8 @@ int main() {
   printf("\nEXPECTED return of f4: some integer other than 0");
   printf("\nACTUAL return of f4: %d\n", s4);
 
+  rpcTerminate();
+
   /* end of client.c */
   return 0;
 }

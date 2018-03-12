@@ -420,8 +420,35 @@ int main(int argc, char *argv[])
                                 }
                             } break;
                         case TERMINATE:
-                            // TODO: Send message to all servers
-                            break;
+                            {
+                                PROCS.clear();
+                                for (i=0; i <= max_sd; ++i)
+                                {
+                                    if (FD_ISSET(i, &master_set))
+                                    {
+                                        struct sockaddr server_addr;
+                                        socklen_t server_addr_len = sizeof(server_addr);
+                                        int result = getpeername(i, &server_addr, &server_addr_len);
+                                        if (result == 0) {
+                                            struct sockaddr_in *server_addr_in = (struct sockaddr_in *)&server_addr;
+                                            std::string server_ip = inet_ntoa(server_addr_in->sin_addr);
+                                            int server_socket_port = ntohs(server_addr_in->sin_port);
+                                            try
+                                            {
+                                                std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
+                                                int server_port = server_ports.at(key);
+                                                DEBUG("TERMINATE(%d): Terminating, ip: %s, port: %d\n", i, server_ip.c_str(), server_port);
+                                                int msg = htonl(TERMINATE);
+                                                send(i, &msg, sizeof(msg), 0);
+                                            }
+                                            catch (std::out_of_range e)
+                                            {
+                                            }
+                                        }
+                                    }
+                                }
+                                end_server = TRUE;
+                            } break;
                         default:
                             break;
                     }
@@ -430,6 +457,7 @@ int main(int argc, char *argv[])
         }
     } while (end_server == FALSE);
 
+    DEBUG("TERMINATING SERVER\n");
     for (i=0; i <= max_sd; ++i)
     {
         if (FD_ISSET(i, &master_set))
