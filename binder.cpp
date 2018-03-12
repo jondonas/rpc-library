@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
                                 max_sd -= 1;
                         }
 
-
+                        continue;
                     }
 
                     len = rc;
@@ -300,7 +300,11 @@ int main(int argc, char *argv[])
                                     arg_type = ntohl(arg_type);
                                     if (arg_type)
                                     {
-                                        proc_signature += std::to_string(arg_type);
+                                        int array_len = arg_type & 0xFFFF;
+                                        if (array_len > 0)
+                                            proc_signature += std::to_string((arg_type & 0xFFFF0000) | 0x1);
+                                        else
+                                            proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
                                 DEBUG("REGISTER: proc: %s, ip: %s, port: %d\n", proc_signature.c_str(), server_ip, server_port);
@@ -326,7 +330,11 @@ int main(int argc, char *argv[])
                                     arg_type = ntohl(arg_type);
                                     if (arg_type)
                                     {
-                                        proc_signature += std::to_string(arg_type);
+                                        int array_len = arg_type & 0xFFFF;
+                                        if (array_len > 0)
+                                            proc_signature += std::to_string((arg_type & 0xFFFF0000) | 0x1);
+                                        else
+                                            proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
                                 DEBUG("LOC_REQUEST: proc: %s\n", proc_signature.c_str());
