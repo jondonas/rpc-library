@@ -431,7 +431,7 @@ int main(int argc, char *argv[])
                                         send(i, &msg, sizeof(msg), 0);
                                         for (int j = 0; j < proc_servers.size(); ++j)
                                         {
-                                            Server s = proc_servers[i];
+                                            Server s = proc_servers[j];
                                             char msg_s[ADDR_SIZE];
                                             strcpy(msg_s, (s.ip).c_str());
                                             send(i, msg_s, sizeof(msg_s), 0);
