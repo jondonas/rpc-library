@@ -17,7 +17,6 @@
 #include "rpc.h"
 #include "rpc_extra.h"
 #include "rpc_errors.h"
-#include "debug.h"
 
 #define SERVER_PORT_KEY(ip, port) (ip + std::to_string(port))
 
@@ -140,7 +139,6 @@ void remove_proc_server(std::string server_ip, std::string server_port)
             PROCS.erase(it);
         }
     }  
-    //DEBUG("PROCS: Initial size %d, final size %d\n", initial_procs_len, PROCS.size());
 }
 
 // Returns the next available server for a given procedure name, otherwise returns NULL.
@@ -302,7 +300,6 @@ int main(int argc, char *argv[])
 
                     if (rc == 0)
                     {
-                        DEBUG("SERVER(%d): Connection closed\n", i);
                         close_conn = true;
                     }
 
@@ -319,7 +316,6 @@ int main(int argc, char *argv[])
                             {
                                 std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
                                 int server_port = server_ports.at(key);
-                                DEBUG("SERVER(%d): Removing proc mappings, ip: %s, port: %d\n", i, server_ip.c_str(), server_port);
                                 remove_proc_server(server_ip, std::to_string(server_port));
                                 server_ports.erase(key);
                             }
@@ -382,7 +378,6 @@ int main(int argc, char *argv[])
                                     std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
                                     server_ports[key] = server_port;
                                     int code = register_proc_server(proc_signature, server_ip, std::to_string(server_port));
-                                    DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
                                     msg = htonl(REGISTER_SUCCESS);
                                     send(i, &msg, sizeof(msg), 0);
                                     msg = htonl(code);
@@ -437,7 +432,6 @@ int main(int argc, char *argv[])
                                             send(i, msg_s, sizeof(msg_s), 0);
                                             int port = htonl(std::stoi((s.port).c_str()));
                                             send(i, (char*)&port, sizeof(port), 0);
-                                            DEBUG("CACHE_LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (s.ip).c_str(), (s.port).c_str());
                                         }
                                     }
                                     else
@@ -446,7 +440,6 @@ int main(int argc, char *argv[])
                                         send(i, &msg, sizeof(msg), 0);
                                         msg = htonl(CACHE_LOC_FAILURE_ERROR_NO_PROC);
                                         send(i, &msg, sizeof(msg), 0);
-                                        DEBUG("CACHE_LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
                                     }
                                 }
                                 else
@@ -462,7 +455,6 @@ int main(int argc, char *argv[])
                                         send(i, msg_s, sizeof(msg_s), 0);
                                         int port = htonl(std::stoi((server->port).c_str()));
                                         send(i, (char*)&port, sizeof(port), 0);
-                                        DEBUG("LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (server->ip).c_str(), (server->port).c_str());
                                     }
                                     else
                                     {
@@ -470,7 +462,6 @@ int main(int argc, char *argv[])
                                         send(i, &msg, sizeof(msg), 0);
                                         msg = htonl(LOC_FAILURE_ERROR_NO_SERVER);
                                         send(i, &msg, sizeof(msg), 0);
-                                        DEBUG("LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
                                     }
                                 }
                             } break;
@@ -492,7 +483,6 @@ int main(int argc, char *argv[])
                                             {
                                                 std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
                                                 int server_port = server_ports.at(key);
-                                                DEBUG("TERMINATE(%d): Terminating, ip: %s, port: %d\n", i, server_ip.c_str(), server_port);
                                                 int msg = htonl(TERMINATE);
                                                 send(i, &msg, sizeof(msg), 0);
                                             }
@@ -512,7 +502,6 @@ int main(int argc, char *argv[])
         }
     } while (end_server == FALSE);
 
-    DEBUG("TERMINATING SERVER\n");
     for (i=0; i <= max_sd; ++i)
     {
         if (FD_ISSET(i, &master_set))
