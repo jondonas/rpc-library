@@ -81,7 +81,7 @@ Server *Proc::get_next_available_server()
  ***/
 
 // Maps a procedure name with a server
-void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
+int register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
     Server server(server_ip, server_port);
     Proc *proc = NULL;
@@ -110,6 +110,11 @@ void register_proc_server(std::string proc_name, std::string server_ip, std::str
     if (!found_proc_server)
     {
         proc->servers.push_back(server);
+        return REGISTER_SUCCESS_NO_ERROR;
+    }
+    else
+    {
+        return REGISTER_SUCCESS_WARNING_OVERRIDE;
     }
 }
 
@@ -376,11 +381,11 @@ int main(int argc, char *argv[])
                                     int server_socket_port = ntohs(server_addr_in->sin_port);
                                     std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
                                     server_ports[key] = server_port;
-                                    register_proc_server(proc_signature, server_ip, std::to_string(server_port));
+                                    int code = register_proc_server(proc_signature, server_ip, std::to_string(server_port));
                                     DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
                                     msg = htonl(REGISTER_SUCCESS);
                                     send(i, &msg, sizeof(msg), 0);
-                                    msg = htonl(REGISTER_SUCCESS_NO_ERROR);
+                                    msg = htonl(code);
                                     send(i, &msg, sizeof(msg), 0);
                                 }
                                 else
