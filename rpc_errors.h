@@ -1,7 +1,7 @@
 #define REGISTER_SUCCESS_NO_ERROR               0
 #define REGISTER_SUCCESS_WARNING_OVERRIDE       1
-#define REGISTER_FAILURE_ERROR_MAP              2
+#define REGISTER_FAILURE_ERROR_MAP              -1
 
-#define LOC_FAILURE_ERROR_NO_SERVER             1
+#define LOC_FAILURE_ERROR_NO_SERVER             -6
 
-#define CACHE_LOC_FAILURE_ERROR_NO_PROC         1
+#define CACHE_LOC_FAILURE_ERROR_NO_PROC         -4

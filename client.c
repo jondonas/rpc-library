@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "rpc.h"
 
@@ -147,10 +148,36 @@ int main() {
     printf("Error: %d\n", s3);
   } 
 
+  return1 = 0;
   int s4 = rpcCall("f4", argTypes4, args4);
   printf("\ncalling f4 to print an non existed file on the server");
   printf("\nEXPECTED return of f4: some integer other than 0");
   printf("\nACTUAL return of f4: %d\n", s4);
+
+  int s5 = rpcCacheCall("f1", argTypes1, args1);
+  printf("\nFirst rpcCacheCall of f1");
+  printf("\nEXPECTED return of f1 is: %ld\n", a1 + b1 * c1 - d1);
+  if (s1 >= 0) { 
+    printf("ACTUAL return of f1 is: %ld\n\n\n", *((long *)(args1[0])));
+  }
+  else {
+    printf("Error: %d\n", s1);
+  }
+
+  // Pause to disconnect first server
+  printf("\nSleeping to disconnect first server");
+  sleep(3);
+
+  return1 = 0;
+  int s6 = rpcCacheCall("f1", argTypes1, args1);
+  printf("\nSecond rpcCacheCall of f1");
+  printf("\nEXPECTED return of f1 is: %ld\n", a1 + b1 * c1 - d1);
+  if (s1 >= 0) { 
+    printf("ACTUAL return of f1 is: %ld\n\n\n", *((long *)(args1[0])));
+  }
+  else {
+    printf("Error: %d\n", s1);
+  }
 
   printf("\nTERMINATING\n");
   rpcTerminate();
