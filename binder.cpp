@@ -135,7 +135,7 @@ void remove_proc_server(std::string server_ip, std::string server_port)
             PROCS.erase(it);
         }
     }  
-    DEBUG("PROCS: Initial size %d, final size %d\n", initial_procs_len, PROCS.size());
+    //DEBUG("PROCS: Initial size %d, final size %d\n", initial_procs_len, PROCS.size());
 }
 
 // Returns the next available server for a given procedure name, otherwise returns NULL.
