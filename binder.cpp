@@ -81,7 +81,7 @@ Server *Proc::get_next_available_server()
  ***/
 
 // Maps a procedure name with a server
-void register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
+int register_proc_server(std::string proc_name, std::string server_ip, std::string server_port)
 {
     Server server(server_ip, server_port);
     Proc *proc = NULL;
@@ -110,6 +110,11 @@ void register_proc_server(std::string proc_name, std::string server_ip, std::str
     if (!found_proc_server)
     {
         proc->servers.push_back(server);
+        return REGISTER_SUCCESS_NO_ERROR;
+    }
+    else
+    {
+        return REGISTER_SUCCESS_WARNING_OVERRIDE;
     }
 }
 
@@ -151,6 +156,20 @@ Server *get_proc_server(std::string proc_name)
     {
     }
     return server;
+}
+
+// Returns the proc for a given procedure name, otherwise returns NULL.
+Proc *get_proc(std::string proc_name)
+{
+    Proc *proc = NULL;
+    try
+    {
+       proc = PROCS.at(proc_name);
+    }
+    catch (std::out_of_range e)
+    {
+    }
+    return proc;
 }
 
 int main(int argc, char *argv[])
@@ -362,11 +381,11 @@ int main(int argc, char *argv[])
                                     int server_socket_port = ntohs(server_addr_in->sin_port);
                                     std::string key = SERVER_PORT_KEY(server_ip, server_socket_port);
                                     server_ports[key] = server_port;
-                                    register_proc_server(proc_signature, server_ip, std::to_string(server_port));
+                                    int code = register_proc_server(proc_signature, server_ip, std::to_string(server_port));
                                     DEBUG("REGISTER(%d): proc: %s, ip: %s, port: %d\n", i, proc_signature.c_str(), server_ip, server_port);
                                     msg = htonl(REGISTER_SUCCESS);
                                     send(i, &msg, sizeof(msg), 0);
-                                    msg = htonl(REGISTER_SUCCESS_NO_ERROR);
+                                    msg = htonl(code);
                                     send(i, &msg, sizeof(msg), 0);
                                 }
                                 else
@@ -378,6 +397,7 @@ int main(int argc, char *argv[])
                                 }
                             } break;
                         case LOC_REQUEST:
+                        case CACHE_LOC_REQUEST:
                             {
                                 char proc_name[PROC_NAME_SIZE];
                                 int arg_type;
@@ -397,26 +417,61 @@ int main(int argc, char *argv[])
                                             proc_signature += std::to_string(arg_type);
                                     }
                                 } while (arg_type != 0);
-                                Server *server = get_proc_server(proc_signature);
-                                int msg;
-                                if (server)
+
+                                if (type == CACHE_LOC_REQUEST)
                                 {
-                                    msg = htonl(LOC_SUCCESS);
-                                    send(i, &msg, sizeof(msg), 0);
-                                    char msg_s[ADDR_SIZE];
-                                    strcpy(msg_s, (server->ip).c_str());
-                                    send(i, msg_s, sizeof(msg_s), 0);
-                                    int port = htonl(std::stoi((server->port).c_str()));
-                                    send(i, (char*)&port, sizeof(port), 0);
-                                    DEBUG("LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (server->ip).c_str(), (server->port).c_str());
+                                    Proc *proc = get_proc(proc_signature);
+                                    int msg;
+                                    if (proc)
+                                    {
+                                        msg = htonl(CACHE_LOC_SUCCESS);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        std::vector<Server> proc_servers = proc->servers;
+                                        msg = htonl(proc_servers.size());
+                                        send(i, &msg, sizeof(msg), 0);
+                                        for (int j = 0; j < proc_servers.size(); ++j)
+                                        {
+                                            Server s = proc_servers[i];
+                                            char msg_s[ADDR_SIZE];
+                                            strcpy(msg_s, (s.ip).c_str());
+                                            send(i, msg_s, sizeof(msg_s), 0);
+                                            int port = htonl(std::stoi((s.port).c_str()));
+                                            send(i, (char*)&port, sizeof(port), 0);
+                                            DEBUG("CACHE_LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (s.ip).c_str(), (s.port).c_str());
+                                        }
+                                    }
+                                    else
+                                    {
+                                        msg = htonl(CACHE_LOC_FAILURE);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        msg = htonl(CACHE_LOC_FAILURE_ERROR_NO_PROC);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        DEBUG("CACHE_LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
+                                    }
                                 }
                                 else
                                 {
-                                    msg = htonl(LOC_FAILURE);
-                                    send(i, &msg, sizeof(msg), 0);
-                                    msg = htonl(LOC_FAILURE_ERROR_NO_SERVER);
-                                    send(i, &msg, sizeof(msg), 0);
-                                    DEBUG("LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
+                                    Server *server = get_proc_server(proc_signature);
+                                    int msg;
+                                    if (server)
+                                    {
+                                        msg = htonl(LOC_SUCCESS);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        char msg_s[ADDR_SIZE];
+                                        strcpy(msg_s, (server->ip).c_str());
+                                        send(i, msg_s, sizeof(msg_s), 0);
+                                        int port = htonl(std::stoi((server->port).c_str()));
+                                        send(i, (char*)&port, sizeof(port), 0);
+                                        DEBUG("LOC_REQUEST(%d): proc: %s, ip: %s, port: %s\n", i, proc_signature.c_str(), (server->ip).c_str(), (server->port).c_str());
+                                    }
+                                    else
+                                    {
+                                        msg = htonl(LOC_FAILURE);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        msg = htonl(LOC_FAILURE_ERROR_NO_SERVER);
+                                        send(i, &msg, sizeof(msg), 0);
+                                        DEBUG("LOC_REQUEST(%d) - FAIL: proc: %s\n", i, proc_signature.c_str());
+                                    }
                                 }
                             } break;
                         case TERMINATE:
