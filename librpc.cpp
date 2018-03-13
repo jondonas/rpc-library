@@ -315,7 +315,7 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     int status;
     recv(sock_binder, &status, 4, 0);
     status = ntohl(status);
-    if (type == LOC_FAILURE) {
+    if (type == REGISTER_FAILURE) {
         // Return error code 
         delete[] name_save;
         return status;
