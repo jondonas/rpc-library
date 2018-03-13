@@ -315,7 +315,7 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
     int status;
     recv(sock_binder, &status, 4, 0);
     status = ntohl(status);
-    if (type == REGISTER_FAILURE) {
+    if (type == LOC_FAILURE) {
         // Return error code 
         delete[] name_save;
         return status;
@@ -455,6 +455,28 @@ void *connection_handler(void *socket_desc) {
     return 0;
 }
 
+void *binder_listen(void *) {
+    DEBUG("Waiting for TERMINATE\n");
+    while (true) {
+        int type;
+        recv(sock_binder, &type, sizeof(type), 0);
+        type = ntohl(type);
+
+        if (type == TERMINATE) {
+            DEBUG("TERMINATE received\n");
+            // Free memory
+            for (auto &entry: database) {
+                delete std::get<0>(entry);
+                delete std::get<1>(entry);
+            }
+            // Terminate the server. This cuts-off all currently running threads
+            shutdown(sock_client, SHUT_RDWR);
+            running = false;
+            break;
+        }
+    }
+}
+
 int rpcExecute(void) {
     DEBUG("rpcExecute\n");
     // If no registered functions, return
@@ -465,10 +487,18 @@ int rpcExecute(void) {
     listen(sock_client, 20);
     DEBUG("listening on sock_client: %d\n", sock_client);
 
+    // Listen for TERMINATE from binder
+    pthread_t t_binder;
+    pthread_create(&t_binder, NULL, &binder_listen, NULL);
+
     // Listen for incoming connections and spawn threads
     pthread_t t_connect;
     while (true) {
         client = accept(sock_client, NULL, NULL);
+
+        if (!running)
+            break;
+
         // Receive message type
         int type;
         recv(client, &type, sizeof(type), 0);
@@ -479,16 +509,8 @@ int rpcExecute(void) {
             DEBUG("rpcExecute EXECUTE\n");
             pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
         }
-        else if (type == TERMINATE) {
-            // Free memory
-            for (auto &entry: database) {
-                delete std::get<0>(entry);
-                delete std::get<1>(entry);
-            }
-            // Terminate the server. This cuts-off all currently running threads
-            break;
-        }
     }
+    DEBUG("rpcExecute finish\n");
      
     return 0;
 }
