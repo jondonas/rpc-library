@@ -66,7 +66,7 @@ Server *Proc::get_next_available_server()
     if (servers.size() == 0) return NULL;
     if (current_server >= servers.size()) current_server = 0;
     Server *server = &(servers[current_server]);
-    if (last_used_server != NULL && server->ip == last_used_server->ip)
+    if (last_used_server != NULL && server->ip == last_used_server->ip && server->port == last_used_server->port)
     {
         current_server = (current_server + 1) % servers.size();
         server = &(servers[current_server]);

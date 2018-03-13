@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <iostream>
 #include "debug.h"
+#include <string>
 
 int binderConnect(int *sock) {
     // Get binder address from env variables
@@ -49,6 +50,109 @@ int getSize(int type) {
     else if (type == ARG_LONG) return sizeof(long);
     else if (type == ARG_DOUBLE) return sizeof(double);
     else if (type == ARG_FLOAT) return sizeof(float);
+}
+
+int sendServer(char* name_send, int* argTypes, void** args, const char* server_addr, int server_port) {
+    DEBUG("sendServer SERVER_ADDRESS: %s, SERVER_PORT: %d\n", server_addr, server_port);
+
+    // Get arg_len
+    int arg_count = 0, type;
+    while (argTypes[arg_count] != 0) ++arg_count;
+    int arg_len = arg_count;
+
+    // Connect to server
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(server_port);
+    inet_pton(AF_INET, server_addr, &server.sin_addr);
+  
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
+        // Couldn't connect to server
+        return -3;
+    }
+
+    // Send EXECUTE request
+    // This iterates through argTypes and sends the actual values found
+    // at the arg
+    int msg = htonl(EXECUTE);
+    send(sock, &msg, sizeof(msg), 0);
+    send(sock, name_send, PROC_NAME_SIZE, 0);
+    msg = htonl(arg_len);
+    send (sock, &msg, sizeof(msg), 0);
+    // Send argTypes
+    arg_count = 0;
+    while (argTypes[arg_count] != 0) {
+        msg = htonl(argTypes[arg_count]);
+        send(sock, &msg, sizeof(msg), 0);
+        ++arg_count;
+    }
+
+    // Send args
+    arg_count = 0;
+    while (argTypes[arg_count] != 0) {
+        bool input = (argTypes[arg_count] >> 31) & 0x1;
+        // Only send args that are input to the server
+        if (!input) {
+            ++arg_count;
+            continue;
+        }
+
+        type = (argTypes[arg_count] >> 16) & 0xFF;
+        int array_len = argTypes[arg_count] & 0xFFFF;
+        // Get size of argument
+        int len = getSize(type);
+
+        // Send elements of array
+        if (array_len > 0) {
+            send(sock, args[arg_count], array_len*len, 0);
+        }
+        // Send scalar
+        else
+            send(sock, args[arg_count], len, 0);
+
+        ++arg_count;
+    }
+
+    // Receive execute response
+    recv(sock, &type, sizeof(type), 0);
+    type = ntohl(type);
+    if (type == EXECUTE_FAILURE) {
+        // Get error code and return
+        int err;
+        recv(sock, &err, 4, 0);
+        err = ntohl(err);
+        return err;
+    }
+
+    DEBUG("sendServer EXECUTE_SUCCESS: %d\n", type);
+    // Else we have success
+    arg_count = 0;
+    while (argTypes[arg_count] != 0) {
+        // Only check for output args
+        bool output = (argTypes[arg_count] >> 30) & 0x1;
+
+        if (!output) {
+            ++arg_count;
+            continue;
+        }
+
+        type = (argTypes[arg_count] >> 16) & 0xFF;
+        int array_len = argTypes[arg_count] & 0xFFFF;
+        int len = getSize(type);
+
+        if (array_len > 0) {
+            recv(sock, args[arg_count], len*array_len, 0);
+        }
+        else
+            recv(sock, args[arg_count], len, 0);
+
+        ++arg_count;
+    }
+
+    close(sock);
+
+    return 0;
 }
 
 int rpcCall(char* name, int* argTypes, void** args) {
@@ -99,101 +203,143 @@ int rpcCall(char* name, int* argTypes, void** args) {
 
     DEBUG("rpcCall SERVER_ADDRESS: %s, SERVER_PORT: %d\n", server_addr, server_port);
 
-    // Connect to server
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_port = htons(server_port);
-    inet_pton(AF_INET, server_addr, &server.sin_addr);
-  
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        // Couldn't connect to server
-        return -3;
+    close(sock);
+
+    return sendServer(name_send, argTypes, args, server_addr, server_port);
+}
+
+int findEntryCache(char *name, int *argTypes) {
+    // Returns the index of duplicate entry. -1 otherwise
+    bool name_found = false, params_found = true;
+    for (int i = 0; i < cached_procs.size(); ++i) {
+        if (strcmp(std::get<0>(cached_procs[i]), name) == 0)
+            name_found = true;
+        // Check params match
+        int arg_count = 0;
+        while (argTypes[arg_count] != 0 && std::get<1>(cached_procs[i])[arg_count] != 0) {
+            int type1 = (argTypes[arg_count] >> 16) & 0xFF;
+            int type2 = (std::get<1>(cached_procs[i])[arg_count] >> 16) & 0xFF;
+
+            if (type1 != type2) {
+                params_found = false;
+                break;
+            }
+            ++arg_count;
+        }
+        if (argTypes[arg_count] != 0 || std::get<1>(cached_procs[i])[arg_count] != 0)
+            params_found = false;
+
+        if (name_found && params_found)
+            return i;
+        else {
+            name_found = false;
+            params_found = true;
+        }
     }
 
-    // Send EXECUTE request
-    // This iterates through argTypes and sends the actual values found
-    // at the arg
-    msg = htonl(EXECUTE);
-    send(sock, &msg, sizeof(msg), 0);
+    return -1;
+}
+
+int rpcCacheCall(char* name, int* argTypes, void** args) {
+    DEBUG("rpcCacheCall\n");
+    int sock, arg_len;
+    int ret = binderConnect(&sock);
+    if (ret < 0)
+        return ret;
+
+    char name_send[PROC_NAME_SIZE];
+    strncpy(name_send, name, PROC_NAME_SIZE-1);
+
+    // Loop and attempt to connect through cached servers
+    int index = findEntryCache(name, argTypes);
+    if (index >= 0) {
+        for (auto &server: std::get<2>(cached_procs[index])) {
+            DEBUG("Cached: Server: %s - Port %d\n", std::get<0>(server).c_str(), std::get<1>(server));
+        }
+        for (auto &server: std::get<2>(cached_procs[index])) {
+            ret = sendServer(name_send, argTypes, args, std::get<0>(server).c_str(), std::get<1>(server));
+            if (ret >= 0) {
+                DEBUG("Found entry in cache\n");
+                return ret;
+            }
+        }
+    }
+
+    // Send CACHE_LOC_REQUEST message
+    int msg = htonl(CACHE_LOC_REQUEST);
+    send(sock, (char*)&msg, sizeof(msg), 0);
+    // Send function name
     send(sock, name_send, PROC_NAME_SIZE, 0);
-    msg = htonl(arg_len);
-    send (sock, &msg, sizeof(msg), 0);
-    // Send argTypes
-    arg_count = 0;
+    // Send message
+    int arg_count = 0;
     while (argTypes[arg_count] != 0) {
         msg = htonl(argTypes[arg_count]);
-        send(sock, &msg, sizeof(msg), 0);
+        send(sock, (char*)&msg, sizeof(msg), 0);
         ++arg_count;
     }
+    // Terminator
+    msg = 0;
+    send(sock, (char*)&msg, sizeof(msg), 0);
 
-    // Send args
-    arg_count = 0;
-    while (argTypes[arg_count] != 0) {
-        bool input = (argTypes[arg_count] >> 31) & 0x1;
-        // Only send args that are input to the server
-        if (!input) {
-            ++arg_count;
-            continue;
-        }
-
-        type = (argTypes[arg_count] >> 16) & 0xFF;
-        int array_len = argTypes[arg_count] & 0xFFFF;
-        // Get size of argument
-        int len = getSize(type);
-
-        // Send elements of array
-        if (array_len > 0) {
-            send(sock, args[arg_count], array_len*len, 0);
-        }
-        // Send scalar
-        else
-            send(sock, args[arg_count], len, 0);
-
-        ++arg_count;
-    }
-
-    // Receive execute response
+    // Receive response
+    int type;
     recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
-    if (type == EXECUTE_FAILURE) {
+    if (type == LOC_FAILURE) {
+        DEBUG("rpcCacheCall CACHE_LOC_FAILURE\n");
         // Get error code and return
         int err;
         recv(sock, &err, 4, 0);
         err = ntohl(err);
         return err;
     }
-
-    DEBUG("rpcCall EXECUTE_SUCCESS: %d\n", type);
     // Else we have success
+    int num;
+    recv(sock, &num, sizeof(num), 0);
+    num = ntohl(num);
+    // Clear old proc from cached_procs first
+    if (index >= 0)
+        cached_procs.erase(cached_procs.begin() + index);
+
+    std::vector<std::tuple<std::string, int>> r_servers;
+    for (int i = 0; i < num; ++i) {
+        char server_addr[ADDR_SIZE];
+        recv(sock, server_addr, ADDR_SIZE, 0);
+        int server_port;
+        recv(sock, &server_port, 4, 0);
+        server_port = ntohl(server_port);
+        r_servers.push_back(std::make_tuple(std::string(server_addr), server_port));
+    }
+    // Alloc mem for name
+    char *name_save = new char[PROC_NAME_SIZE];
+    strncpy(name_save, name, PROC_NAME_SIZE-1);
+    // Alloc mem for argTypes
+    int *argTypes_save = new int[arg_len+1];
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
-        // Only check for output args
-        bool output = (argTypes[arg_count] >> 30) & 0x1;
-
-        if (!output) {
-            ++arg_count;
-            continue;
-        }
-
-        type = (argTypes[arg_count] >> 16) & 0xFF;
-        int array_len = argTypes[arg_count] & 0xFFFF;
-        int len = getSize(type);
-
-        if (array_len > 0) {
-            recv(sock, args[arg_count], len*array_len, 0);
-        }
-        else
-            recv(sock, args[arg_count], len, 0);
-
+        argTypes_save[arg_count] = argTypes[arg_count];
         ++arg_count;
     }
+    argTypes_save[arg_count] = 0;
+    cached_procs.push_back(std::make_tuple(name_save, argTypes_save, r_servers));
 
     close(sock);
 
-    DEBUG("Done rpcCall\n");
+    // Loop again and attempt to connect through cached servers
+    for (auto &server: std::get<2>(cached_procs[index])) {
+            DEBUG("After cache call: Server: %s - Port %d\n", std::get<0>(server).c_str(), std::get<1>(server));
+    }
+    for (auto &server: r_servers) {
+        ret = sendServer(name_send, argTypes, args, std::get<0>(server).c_str(), std::get<1>(server));
+        if (ret >= 0) {
+            DEBUG("Execute after cache\n");
+            return ret;
+        }
+    }
 
-    return 0;
+    DEBUG("FAILURE rpcCacheCall\n");
+
+    return -5;
 }
 
 int rpcTerminate(void) {
@@ -258,7 +404,6 @@ int findEntryDB(char *name, int *argTypes) {
         while (argTypes[arg_count] != 0 && std::get<1>(database[i])[arg_count] != 0) {
             int type1 = (argTypes[arg_count] >> 16) & 0xFF;
             int type2 = (std::get<1>(database[i])[arg_count] >> 16) & 0xFF;
-            DEBUG("type1: %d - type2: %d\n", type1, type2);
 
             if (type1 != type2) {
                 params_found = false;
@@ -380,7 +525,7 @@ void *connection_handler(void *socket_desc) {
     else {
         delete argTypes;
         DEBUG("connection_handler NOT FOUND\n");
-        sendExecFailure(sock, -4);
+        sendExecFailure(sock, -5);
         return NULL;
     }
 
@@ -418,7 +563,7 @@ void *connection_handler(void *socket_desc) {
         delete args;
         delete argTypes;
         DEBUG("connection_handler SKEL ERROR\n");
-        sendExecFailure(sock, -5);
+        sendExecFailure(sock, -6);
         return NULL;
     }
 
@@ -466,6 +611,10 @@ void *binder_listen(void *) {
             DEBUG("TERMINATE received\n");
             // Free memory
             for (auto &entry: database) {
+                delete std::get<0>(entry);
+                delete std::get<1>(entry);
+            }
+            for (auto &entry: cached_procs) {
                 delete std::get<0>(entry);
                 delete std::get<1>(entry);
             }
