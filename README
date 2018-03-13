@@ -1,0 +1,40 @@
+README
+
+--------------------------------------------------------------------------------
+
+Group Members:
+
+Anton Shevchenko - ashevche - 20549540
+Jonathan Donas - jdonas - 20631146
+
+--------------------------------------------------------------------------------
+
+Dependencies:
+
+Our implementation also requires the use of threading
+To compile the client and server, add -lpthread to the command
+
+Example:
+g++ -L. client.o -lrpc -o client -lpthread
+g++ -L. server_functions.o server_function_skels.o server.o -lrpc -o server -lpthread
+
+--------------------------------------------------------------------------------
+
+Running Example:
+
+make
+
+gcc -c client.c
+g++ -L. client.o -lrpc -o client -lpthread
+
+gcc -c server.c
+gcc -c server_functions.c
+gcc -c server_function_skels.c
+g++ -L. server_functions.o server_function_skels.o server.o -lrpc -o server -lpthread
+
+./binder
+[manually set BINDER_ADDRESS and BINDER_PORT]
+./server
+./client
+
+--------------------------------------------------------------------------------

@@ -13,7 +13,6 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <iostream>
-#include "debug.h"
 #include <string>
 
 int binderConnect(int *sock) {
@@ -53,8 +52,6 @@ int getSize(int type) {
 }
 
 int sendServer(char* name_send, int* argTypes, void** args, const char* server_addr, int server_port) {
-    DEBUG("sendServer SERVER_ADDRESS: %s, SERVER_PORT: %d\n", server_addr, server_port);
-
     // Get arg_len
     int arg_count = 0, type;
     while (argTypes[arg_count] != 0) ++arg_count;
@@ -125,7 +122,6 @@ int sendServer(char* name_send, int* argTypes, void** args, const char* server_a
         return err;
     }
 
-    DEBUG("sendServer EXECUTE_SUCCESS: %d\n", type);
     // Else we have success
     arg_count = 0;
     while (argTypes[arg_count] != 0) {
@@ -156,7 +152,6 @@ int sendServer(char* name_send, int* argTypes, void** args, const char* server_a
 }
 
 int rpcCall(char* name, int* argTypes, void** args) {
-    DEBUG("rpcCall\n");
     int sock, arg_len;
     int ret = binderConnect(&sock);
     if (ret < 0)
@@ -186,7 +181,6 @@ int rpcCall(char* name, int* argTypes, void** args) {
     recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
     if (type == LOC_FAILURE) {
-        DEBUG("rpcCall LOC_FAILURE\n");
         // Get error code and return
         int err;
         recv(sock, &err, 4, 0);
@@ -199,10 +193,6 @@ int rpcCall(char* name, int* argTypes, void** args) {
     int server_port;
     recv(sock, &server_port, 4, 0);
     server_port = ntohl(server_port);
-    close(sock);
-
-    DEBUG("rpcCall SERVER_ADDRESS: %s, SERVER_PORT: %d\n", server_addr, server_port);
-
     close(sock);
 
     return sendServer(name_send, argTypes, args, server_addr, server_port);
@@ -241,7 +231,6 @@ int findEntryCache(char *name, int *argTypes) {
 }
 
 int rpcCacheCall(char* name, int* argTypes, void** args) {
-    DEBUG("rpcCacheCall\n");
     int sock, arg_len;
     int ret = binderConnect(&sock);
     if (ret < 0)
@@ -254,14 +243,9 @@ int rpcCacheCall(char* name, int* argTypes, void** args) {
     int index = findEntryCache(name, argTypes);
     if (index >= 0) {
         for (auto &server: std::get<2>(cached_procs[index])) {
-            DEBUG("Cached: Server: %s - Port %d\n", std::get<0>(server).c_str(), std::get<1>(server));
-        }
-        for (auto &server: std::get<2>(cached_procs[index])) {
             ret = sendServer(name_send, argTypes, args, std::get<0>(server).c_str(), std::get<1>(server));
-            if (ret >= 0) {
-                DEBUG("Found entry in cache\n");
+            if (ret >= 0)
                 return ret;
-            }
         }
     }
 
@@ -286,7 +270,6 @@ int rpcCacheCall(char* name, int* argTypes, void** args) {
     recv(sock, &type, sizeof(type), 0);
     type = ntohl(type);
     if (type == LOC_FAILURE) {
-        DEBUG("rpcCacheCall CACHE_LOC_FAILURE\n");
         // Get error code and return
         int err;
         recv(sock, &err, 4, 0);
@@ -326,18 +309,12 @@ int rpcCacheCall(char* name, int* argTypes, void** args) {
     close(sock);
 
     // Loop again and attempt to connect through cached servers
-    for (auto &server: std::get<2>(cached_procs[index])) {
-            DEBUG("After cache call: Server: %s - Port %d\n", std::get<0>(server).c_str(), std::get<1>(server));
-    }
     for (auto &server: r_servers) {
         ret = sendServer(name_send, argTypes, args, std::get<0>(server).c_str(), std::get<1>(server));
         if (ret >= 0) {
-            DEBUG("Execute after cache\n");
             return ret;
         }
     }
-
-    DEBUG("FAILURE rpcCacheCall\n");
 
     return -5;
 }
@@ -364,15 +341,12 @@ int rpcInit(void) {
     int on = 1;
     struct sockaddr_in address;
     sock_client = socket(AF_INET, SOCK_STREAM, 0);
-    DEBUG("sock_client created: %d\n", sock_client);
 
     // Bind socket
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(0);
     ret = bind(sock_client, (struct sockaddr *)&address, sizeof(address));
-    if (ret >= 0)
-        DEBUG("sock_client bound\n");
 
     // Get client port
     struct sockaddr_in sin;
@@ -388,8 +362,6 @@ int rpcInit(void) {
     host = gethostbyname(hostname);
     addresses = (struct in_addr **) host->h_addr_list;
     strncpy(server_ip, inet_ntoa(*addresses[0]), 64);
-    DEBUG("SERVER_ADDRESS: %s\n", server_ip);
-    DEBUG("CLIENT_PORT: %d\n", client_port);
     return 0;
 }
 
@@ -426,7 +398,6 @@ int findEntryDB(char *name, int *argTypes) {
 }
 
 int rpcRegister(char *name, int *argTypes, skeleton f) {
-    DEBUG("rpcRegister\n");
     // Alloc memory for saving in database later
     char *name_save = new char[PROC_NAME_SIZE];
 
@@ -482,7 +453,6 @@ int rpcRegister(char *name, int *argTypes, skeleton f) {
 
     // Add new entry
     database.push_back(std::make_tuple(name_save, argTypes_save, f));
-    DEBUG("Registered: %s %p\n", name_save, f);
 
     // status will be >= 0, so return it to include warnings
     return status;
@@ -497,12 +467,10 @@ void sendExecFailure(int sock, int errcode) {
 
 void *connection_handler(void *socket_desc) {
     int sock = *(int *)socket_desc;
-    DEBUG("Socket: %d\n", sock);
 
     // Get function name
     char name[PROC_NAME_SIZE];
     recv(sock, name, PROC_NAME_SIZE, 0);
-    DEBUG("Running: %s\n", name);
 
     // Get argTypes
     int arg_len;
@@ -524,12 +492,9 @@ void *connection_handler(void *socket_desc) {
         skel = std::get<2>(database[index]);
     else {
         delete argTypes;
-        DEBUG("connection_handler NOT FOUND\n");
         sendExecFailure(sock, -5);
         return NULL;
     }
-
-    DEBUG("Found: %s %p\n", name, skel);
 
     // Get args
     void **args = new void*[arg_len];
@@ -552,8 +517,6 @@ void *connection_handler(void *socket_desc) {
         recv(sock, args[i], len*array_len, 0);
     }
 
-    DEBUG("connection_handler RUN SKELETON\n");
-
     // Run skeleton
     int ret = skel(argTypes, args);
 
@@ -562,12 +525,9 @@ void *connection_handler(void *socket_desc) {
         for (int i = 0; i < arg_len; ++i) free(args[i]);
         delete args;
         delete argTypes;
-        DEBUG("connection_handler SKEL ERROR\n");
         sendExecFailure(sock, -6);
         return NULL;
     }
-
-    DEBUG("connection_handler SKELETON DONE\n");
 
     // Return execute success
     int msg = htonl(EXECUTE_SUCCESS);
@@ -595,20 +555,16 @@ void *connection_handler(void *socket_desc) {
     delete args;
     delete argTypes;
 
-    DEBUG("connection_handler RESULT SENT\n");
-
     return 0;
 }
 
 void *binder_listen(void *) {
-    DEBUG("Waiting for TERMINATE\n");
     while (true) {
         int type;
         recv(sock_binder, &type, sizeof(type), 0);
         type = ntohl(type);
 
         if (type == TERMINATE) {
-            DEBUG("TERMINATE received\n");
             // Free memory
             for (auto &entry: database) {
                 delete std::get<0>(entry);
@@ -627,14 +583,12 @@ void *binder_listen(void *) {
 }
 
 int rpcExecute(void) {
-    DEBUG("rpcExecute\n");
     // If no registered functions, return
     if (database.size() == 0)
         return -1;
 
     int client;
     listen(sock_client, 20);
-    DEBUG("listening on sock_client: %d\n", sock_client);
 
     // Listen for TERMINATE from binder
     pthread_t t_binder;
@@ -655,11 +609,9 @@ int rpcExecute(void) {
 
         if (type == EXECUTE) {
             // Serve the request
-            DEBUG("rpcExecute EXECUTE\n");
             pthread_create(&t_connect, NULL, &connection_handler, (void *)&client);
         }
     }
-    DEBUG("rpcExecute finish\n");
      
     return 0;
 }
